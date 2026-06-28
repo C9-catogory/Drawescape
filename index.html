@@ -3,15 +3,266 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#fff5e8" />
-  <title>Drawescape｜绘梦境</title>
-  <meta name="description" content="Drawescape 是一个面向 ND 群体的可视化绘画建模小游戏：用结构、透视、深度、光、材质、风和流体，把现实折叠成画。" />
+  <meta name="theme-color" content="#fff6ea" />
+  <title>Drawescape V3｜绘梦境</title>
+  <meta name="description" content="Drawescape 是一个可视化绘画建模互动游戏：用 Three.js、Canvas、透视网格、调色教学和流体模拟，把绘画变成世界模型推理。" />
   <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body class="theme-paper">
-  <canvas id="dreamBg" aria-hidden="true"></canvas>
-  <div id="app" class="app"></div>
-  <noscript>Drawescape 需要 JavaScript 来运行互动小游戏。Please enable JavaScript.</noscript>
-  <script src="app.js"></script>
+  <canvas id="starCanvas" aria-hidden="true"></canvas>
+  <div class="focus-lens" aria-hidden="true"></div>
+
+  <aside class="side" id="sideNav" aria-label="Drawescape 导航">
+    <button class="brand" data-page="home" aria-label="回到首页">
+      <span class="brand-mark">✦</span>
+      <span><b>Drawescape</b><small>绘梦境 V3</small></span>
+    </button>
+    <nav class="nav-list">
+      <button data-page="home">🌌 入口</button>
+      <button data-page="world">🗺️ 绘境地图</button>
+      <button data-page="quest">⭐ 关卡任务</button>
+      <button data-page="studio3d">🧊 3D 建模实验室</button>
+      <button data-page="perspective">📐 透视画布</button>
+      <button data-page="color">🎨 调色画板</button>
+      <button data-page="flow">💧 风水流体</button>
+      <button data-page="sources">📚 原理来源</button>
+    </nav>
+    <div class="side-tools">
+      <button id="themeBtn">🌙 睡前</button>
+      <button id="geoBtn">▦ 几何</button>
+      <button id="focusBtn">🟨 聚焦</button>
+      <button id="motionBtn">🫧 低动画</button>
+    </div>
+    <p class="tiny">本地运行 / GitHub Pages 可部署。3D 模块使用 CDN 加载 Three.js。</p>
+  </aside>
+
+  <main class="app" id="app">
+    <section id="home" class="page active hero-page">
+      <div class="hero-card">
+        <div class="mega-stage">
+          <canvas id="heroCanvas"></canvas>
+          <div class="scan-hud">
+            <span>SCAN: GEOMETRY</span><span>DEPTH</span><span>LIGHT</span><span>FOLD</span>
+          </div>
+          <div class="portal-badge">World Folding Engine · Online</div>
+        </div>
+        <div class="hero-copy">
+          <p class="eyebrow">A drawing game for seeing, modeling, and folding the world</p>
+          <h1>Drawescape<br><span>把现实折叠成画</span></h1>
+          <p class="lead">这里不是严肃网课，而是一个温柔、几何、彩色的绘画推理游戏。你会拖动相机、旋转模型、调整透视、观察深度、选择颜色、模拟风和水，然后理解：绘画是如何把三维世界压缩成平面。</p>
+          <div class="hero-actions">
+            <button class="primary" data-page="studio3d">进入 3D 实验室</button>
+            <button class="secondary" data-page="perspective">打开透视画布</button>
+            <button class="secondary" data-page="quest">今日一小关</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="world" class="page">
+      <header class="page-title">
+        <div>
+          <p class="eyebrow">World Map</p>
+          <h2>绘境地图：从线条到世界模型</h2>
+          <p>每个星区对应一个绘画难点，也对应一个计算机图形 / 计算机视觉概念。点击星区，会看到学习目标、互动关卡和绘画练习。</p>
+        </div>
+      </header>
+      <div class="world-layout">
+        <svg id="worldSvg" viewBox="0 0 1080 660" role="img" aria-label="Drawescape 绘境地图"></svg>
+        <article class="inspector" id="zoneInspector"></article>
+      </div>
+    </section>
+
+    <section id="quest" class="page">
+      <header class="page-title">
+        <div>
+          <p class="eyebrow">Quest Board</p>
+          <h2>关卡任务：像解谜一样学画画</h2>
+          <p>每一关都对应一个真实绘画能力：比例记忆、透视校准、深度排序、法线推理、材质选择、风水流体和信息压缩。</p>
+        </div>
+      </header>
+      <div class="quest-grid" id="questGrid"></div>
+    </section>
+
+    <section id="studio3d" class="page">
+      <header class="page-title split-title">
+        <div>
+          <p class="eyebrow">Real 3D Lab · Three.js</p>
+          <h2>3D 建模实验室：线稿如何变成模型</h2>
+          <p>拖动形体、旋转相机、调整焦距、光照和材质。这里把 Procreate / PS 的线稿思维，桥接到 Rhino / SU / Blender 的建模思维。</p>
+        </div>
+        <div class="mini-note">提示：拖拽物体；右键/双指旋转视角；滚轮缩放。选中物体后可调材质。</div>
+      </header>
+      <div class="studio-layout">
+        <div class="three-shell">
+          <div id="threeMount" class="three-mount"></div>
+          <canvas id="projectionOverlay" class="projection-overlay"></canvas>
+          <div class="three-status" id="threeStatus">Loading Three.js...</div>
+        </div>
+        <aside class="control-panel">
+          <h3>形体库</h3>
+          <div class="button-grid">
+            <button data-add-shape="box">盒子 Box</button>
+            <button data-add-shape="sphere">球 Sphere</button>
+            <button data-add-shape="cylinder">圆柱 Cylinder</button>
+            <button data-add-shape="cone">圆锥 Cone</button>
+            <button data-add-shape="torus">环 Torus</button>
+            <button data-add-shape="ribbon">飘带 Ribbon</button>
+          </div>
+          <h3>从绘画到建模</h3>
+          <div class="button-grid">
+            <button data-bridge="extrude">轮廓 → 推拉</button>
+            <button data-bridge="lathe">侧影 → 旋转体</button>
+            <button data-bridge="sweep">路径 → 扫掠</button>
+            <button data-bridge="surface">深度层 → 曲面</button>
+          </div>
+          <h3>相机 / 透视</h3>
+          <label>FOV 焦距/视角 <input id="fovRange" type="range" min="18" max="88" value="46"></label>
+          <label>相机高度 <input id="camHeightRange" type="range" min="1" max="8" step="0.1" value="3.2"></label>
+          <label><input id="overlayToggle" type="checkbox" checked> 显示 2D 投影线稿</label>
+          <label><input id="wireToggle" type="checkbox"> 线框模式</label>
+          <h3>材质 / 光</h3>
+          <label>粗糙度 Roughness <input id="roughRange" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+          <label>金属度 Metalness <input id="metalRange" type="range" min="0" max="1" step="0.01" value="0.08"></label>
+          <label>光源 X <input id="lightXRange" type="range" min="-6" max="6" step="0.1" value="2"></label>
+          <label>光源 Y <input id="lightYRange" type="range" min="1" max="9" step="0.1" value="5"></label>
+          <div class="button-grid">
+            <button id="sceneStillBtn">静物场景</button>
+            <button id="sceneRoomBtn">房间透视</button>
+            <button id="sceneStreetBtn">街道透视</button>
+            <button id="clear3dBtn">清空</button>
+          </div>
+          <div class="principle-card" id="threePrinciple">原理：三维点经过相机矩阵投影到二维画面，透视线稿就是 3D 模型的屏幕投影。</div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="perspective" class="page">
+      <header class="page-title split-title">
+        <div>
+          <p class="eyebrow">Perspective Drawing Pad</p>
+          <h2>透视画布：可拖动消失点的绘画台</h2>
+          <p>这不是静态网格。你可以拖动消失点、改变视平线、切换一点/两点/三点透视，再直接在网格上画线稿或导入自己的参考图。</p>
+        </div>
+        <div class="mini-note">拖动蓝色/紫色消失点。选择画笔后可绘制，网格会实时重绘。</div>
+      </header>
+      <div class="pad-layout">
+        <div class="canvas-wrap">
+          <canvas id="perspectiveCanvas"></canvas>
+        </div>
+        <aside class="control-panel">
+          <h3>透视模式</h3>
+          <div class="button-grid">
+            <button data-persp-mode="1p">一点</button>
+            <button data-persp-mode="2p" class="active">两点</button>
+            <button data-persp-mode="3p">三点</button>
+          </div>
+          <h3>工具</h3>
+          <div class="button-grid">
+            <button data-draw-tool="draw" class="active">画笔</button>
+            <button data-draw-tool="erase">橡皮</button>
+            <button data-draw-tool="vp">只调透视</button>
+            <button id="undoStrokeBtn">撤销</button>
+          </div>
+          <label>线宽 <input id="brushSize" type="range" min="1" max="24" value="4"></label>
+          <label>线色 <input id="brushColor" type="color" value="#33424c"></label>
+          <label>网格密度 <input id="gridDensity" type="range" min="4" max="18" value="10"></label>
+          <label>网格透明度 <input id="gridAlpha" type="range" min="0" max="1" step="0.05" value="0.55"></label>
+          <h3>参考 / 输出</h3>
+          <input id="imageUpload" type="file" accept="image/*">
+          <div class="button-grid">
+            <button id="clearDrawingBtn">清空绘画</button>
+            <button id="downloadDrawingBtn">导出 PNG</button>
+          </div>
+          <div class="principle-card">原理：透视是三维平行线在成像平面上的汇聚。画布上拖动消失点，相当于改变相机方向和空间坐标系。</div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="color" class="page">
+      <header class="page-title split-title">
+        <div>
+          <p class="eyebrow">Color Atelier</p>
+          <h2>调色画板：颜色不是玄学，是通道合成</h2>
+          <p>用一个基础色生成互补、邻近、三角配色，并学习固有色、光照色、环境色、高光色如何共同构成画面。</p>
+        </div>
+      </header>
+      <div class="color-layout">
+        <article class="color-card big">
+          <h3>选择固有色</h3>
+          <input id="baseColor" type="color" value="#f29ba7" class="big-color-input">
+          <label>明度 Value <input id="valueRange" type="range" min="30" max="92" value="72"></label>
+          <label>饱和 Saturation <input id="satRange" type="range" min="20" max="100" value="64"></label>
+          <div class="sphere-demo" id="sphereDemo"></div>
+        </article>
+        <article class="color-card">
+          <h3>配色生成</h3>
+          <div id="paletteGrid" class="palette-grid"></div>
+          <p class="explain" id="colorExplain"></p>
+        </article>
+        <article class="color-card">
+          <h3>绘画通道</h3>
+          <div class="channel-stack" id="channelStack"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="flow" class="page">
+      <header class="page-title split-title">
+        <div>
+          <p class="eyebrow">Fluid Valley</p>
+          <h2>风、水、烟：看不见的力如何变成线</h2>
+          <p>流体没有固定轮廓，只有力场、密度、边缘和节奏。拖动方向点，观察线条如何改变。</p>
+        </div>
+      </header>
+      <div class="flow-layout">
+        <div class="canvas-wrap flow-canvas-wrap">
+          <canvas id="flowCanvas"></canvas>
+        </div>
+        <aside class="control-panel">
+          <h3>模拟类型</h3>
+          <div class="button-grid">
+            <button data-flow-mode="wind" class="active">风</button>
+            <button data-flow-mode="water">水流</button>
+            <button data-flow-mode="smoke">烟</button>
+            <button data-flow-mode="rain">雨</button>
+          </div>
+          <label>速度 <input id="flowSpeed" type="range" min="0.2" max="4" step="0.1" value="1.4"></label>
+          <label>扰动 <input id="flowTurb" type="range" min="0" max="2" step="0.05" value="0.7"></label>
+          <label>密度 <input id="flowDensity" type="range" min="40" max="220" value="110"></label>
+          <div class="principle-card" id="flowPrinciple">原理：画风不是画空气，而是画头发、布料、烟、水面这些可见对象对力场的反应。</div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="sources" class="page">
+      <header class="page-title">
+        <div>
+          <p class="eyebrow">Knowledge Sources</p>
+          <h2>原理来源：把绘画经验连接到可查证知识</h2>
+          <p>V3 先把知识来源做成“方向卡”。后续可以逐步加正式参考书、论文、教程链接和每个关卡的讲解页。</p>
+        </div>
+      </header>
+      <div class="source-grid" id="sourceGrid"></div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="手机底部导航">
+    <button data-page="home">🌌<span>入口</span></button>
+    <button data-page="studio3d">🧊<span>3D</span></button>
+    <button data-page="perspective">📐<span>透视</span></button>
+    <button data-page="color">🎨<span>调色</span></button>
+    <button data-page="flow">💧<span>流体</span></button>
+  </nav>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
