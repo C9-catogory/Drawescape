@@ -1,286 +1,367 @@
-'use strict';
+(function(){
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+  const storeKey = 'drawescape.v10.memory';
+  const state = {
+    route:'hub', sub:null, mapTab:'world', currentQuestStep:0,
+    selectedConcept:'fov', studioTool:'pen', studioDrawing:false,
+    memory: JSON.parse(localStorage.getItem(storeKey)||'[]'),
+    progress: JSON.parse(localStorage.getItem('drawescape.v10.progress')||'{}')
+  };
 
-const $ = (id) => document.getElementById(id);
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const lerp = (a,b,t)=>a+(b-a)*t;
-const TAU = Math.PI * 2;
+  const pipeline = [
+    {id:'sample', title:'观察采样', icon:'👁️', short:'先看见，不急着画。', computer:'Input image / visual sampling', drawing:'找对象、边界和视觉重点。'},
+    {id:'structure', title:'结构识别', icon:'🧱', short:'它由哪些体块组成？', computer:'Mesh / primitive / topology', drawing:'球、盒、柱、楔体、曲面。'},
+    {id:'coordinate', title:'坐标对齐', icon:'📍', short:'所有部件挂在哪个坐标系上？', computer:'Origin / local axes / transform', drawing:'锚点、比例、对齐、负形。'},
+    {id:'camera', title:'相机投影', icon:'📷', short:'三维如何折到平面？', computer:'Camera / FOV / projection', drawing:'视平线、消失点、透视变形。'},
+    {id:'depth', title:'深度排序', icon:'🌊', short:'谁在前，谁在后？', computer:'Depth map / Z-buffer', drawing:'前中后景、遮挡、空气透视。'},
+    {id:'surface', title:'表面朝向', icon:'🧭', short:'这个面朝哪里？', computer:'Normal vector / normal map', drawing:'面转向、体积感、轮廓变化。'},
+    {id:'light', title:'光照计算', icon:'💡', short:'光如何落在面上？', computer:'Diffuse / shadow / AO', drawing:'明暗交界线、投影、反光。'},
+    {id:'material', title:'材质反应', icon:'🧪', short:'表面如何回应光？', computer:'Shader / roughness / Fresnel', drawing:'固有色、高光、纹理、透明。'},
+    {id:'force', title:'力学变形', icon:'🌬️', short:'形体为什么弯曲流动？', computer:'Constraint / cloth / force field', drawing:'褶皱、头发、水、风、烟。'},
+    {id:'compression', title:'二维压缩', icon:'✂️', short:'哪些信息被保留？', computer:'Feature extraction / abstraction', drawing:'线条、色块、阴影块、简化。'},
+    {id:'style', title:'风格表达', icon:'🌈', short:'感受如何变成画面？', computer:'Parameter system / visual hierarchy', drawing:'比例夸张、构图、色彩情绪。'}
+  ];
 
-const pipeline = [
-  {t:'观察采样', en:'Observe', d:'眼睛像相机一样采样，但大脑会主动补全。', c:'#54c6d3'},
-  {t:'拆层分析', en:'Scan', d:'结构、深度、法线、光、材质、力、情绪分开看。', c:'#8f7be8'},
-  {t:'坐标对齐', en:'Align', d:'建立画面坐标、物体坐标、相机坐标。', c:'#4a8fd6'},
-  {t:'几何建模', en:'Model', d:'用球、盒、柱、曲面和拓扑理解对象。', c:'#77a987'},
-  {t:'光学渲染', en:'Render', d:'法线、漫反射、高光、AO、材质生成明暗。', c:'#f5b94f'},
-  {t:'二维折叠', en:'Fold', d:'把三维世界投影并压缩到平面。', c:'#ee8e8e'},
-  {t:'风格表达', en:'Style', d:'决定保留、删除、夸张哪些信息。', c:'#d38df0'}
-];
+  const islands = [
+    {id:'structure', title:'结构岛', icon:'🧱', core:'这个东西是什么形？', duty:'点、线、面、体块、拓扑、轮廓。', levels:['识别基本体','拆复杂对象','搭代理模型','迁移到人物/自然']},
+    {id:'coordinate', title:'坐标岛', icon:'📍', core:'这个东西在哪里？', duty:'锚点、比例、局部坐标、对齐、负形。', levels:['找锚点','用单位复原','修正偏差','保持风格变形不崩']},
+    {id:'camera', title:'相机岛', icon:'📷', core:'它为什么这样变形？', duty:'视平线、消失点、FOV、焦距、正交。', levels:['找视平线','调 FOV 预测','画透视盒子','用透视表达情绪']},
+    {id:'depth', title:'深度岛', icon:'🌊', core:'谁在前，谁在后？', duty:'Depth Map、遮挡、前中后景、空气透视。', levels:['排序远近','涂深度层','拆复杂场景','用空间表达情绪']},
+    {id:'surface', title:'表面岛', icon:'🧭', core:'这个面朝哪里？', duty:'Normal、曲率、面转折、法线图。', levels:['看面朝向','预测轮廓变化','画体积转面','迁移到脸/褶皱']},
+    {id:'light', title:'光影岛', icon:'💡', core:'光为什么这样落下？', duty:'漫反射、明暗交界线、投影、AO。', levels:['识别明暗','预测交界线','画新形体阴影','压缩成漫画阴影']},
+    {id:'material', title:'材质岛', icon:'🧪', core:'同样的光，为什么反应不同？', duty:'固有色、粗糙度、高光、菲涅尔、SSS。', levels:['区分材质','调高光','画材质球','动漫化材质']},
+    {id:'force', title:'力学岛', icon:'🌬️', core:'形状为什么弯曲、流动？', duty:'重力、张力、压缩、风、水、烟、布料。', levels:['找固定点','预测张力','生成褶皱','风格化线条']},
+    {id:'compression', title:'压缩岛', icon:'✂️', core:'三维现实如何变成二维绘画？', duty:'轮廓提取、线条选择、明暗简化、色块化。', levels:['找关键信息','删噪音','画压缩版本','建立个人元素库']},
+    {id:'style', title:'风格岛', icon:'🌈', core:'感受如何变成画面？', duty:'线条、色彩、比例、构图、节奏、个人风格。', levels:['识别风格参数','调情绪变量','输出风格卡','形成个人风格库']}
+  ];
 
-const islands = [
-  {id:'line', icon:'〰️', name:'线之海', core:'线不是线，是信息边界。', color:'#54c6d3',
-    real:['轮廓随视角改变','结构转折产生边界','力线记录运动或张力'],
-    science:['拓扑 Edge / Face','曲率变化','特征提取与压缩'],
-    drawing:['轮廓线','结构线','褶皱线','漫画强调线'],
-    practice:['同一物体旋转后找轮廓','只用 5 条线压缩物体','区分结构线和装饰线']},
-  {id:'ratio', icon:'📐', name:'比例森林', core:'画准不是背比例，是坐标系一致。', color:'#77a987',
-    real:['对象有相对尺度','局部关系依附全局坐标','负形能校验比例'],
-    science:['坐标系','向量长度比','关键点匹配'],
-    drawing:['锚点','对齐线','参考单位','比例误差'],
-    practice:['记住 5 个锚点再复原','用一个单位搭建人物','检查眼鼻口是否同坐标系']},
-  {id:'camera', icon:'📷', name:'相机塔', core:'透视是一种观看世界的方式。', color:'#4a8fd6',
-    real:['近大远小','平行线汇聚','视平线跟眼高相关'],
-    science:['针孔相机','投影矩阵','FOV / 焦距','消失点'],
-    drawing:['一点/两点/三点透视','广角/长焦','轴测/散点'],
-    practice:['拖相机高度','调 FOV','修复错误盒子','比较正交和透视']},
-  {id:'depth', icon:'🌊', name:'深度湖', core:'深度不是阴影。', color:'#8f7be8',
-    real:['点到观察者有远近','遮挡提供空间顺序','空气让远处低对比'],
-    science:['Depth Map','Z-buffer','单目深度线索'],
-    drawing:['前中后景','深度热力图','大气透视'],
-    practice:['只涂距离不涂阴影','给物体排序近远','把照片拆成三层']},
-  {id:'light', icon:'💡', name:'光之月台', core:'明暗交界线是几何结果。', color:'#f5b94f',
-    real:['表面朝向决定受光','结构会遮挡光','环境会反射回暗部'],
-    science:['Normal · Light','Diffuse','Specular','AO'],
-    drawing:['亮部/半调子/核心暗部/反光','投影','交界线'],
-    practice:['拖光源找交界线','标法线箭头','把真实光影压成漫画阴影块']},
-  {id:'material', icon:'🧪', name:'材质星市', core:'颜色是渲染结果，不是单纯色盘。', color:'#ee8e8e',
-    real:['不同材质反光不同','皮肤半透明','布料高光散'],
-    science:['Albedo','BRDF','Roughness','Fresnel','SSS'],
-    drawing:['固有色','环境色','高光形状','质感边缘'],
-    practice:['同一球切换材质','调粗糙度看高光','把写实材质压成动漫上色']},
-  {id:'fold', icon:'🧵', name:'褶皱山谷', core:'褶皱不是装饰，是力的地图。', color:'#c9895e',
-    real:['布料受固定点约束','重力下垂','拉伸和压缩生成褶皱'],
-    science:['约束点','张力场','材料刚度','曲率'],
-    drawing:['固定点密线','张力长线','压缩碎线','材质硬软'],
-    practice:['单点悬挂','双点张力','肘部压缩','风中飘带']},
-  {id:'human', icon:'👁️', name:'人形剧场', core:'人也是几何，只是关系更复杂。', color:'#d38df0',
-    real:['五官嵌在头部体积里','眼睛围绕眼球','表情改变肌肉张力'],
-    science:['头部代理模型','局部坐标系','参数化比例'],
-    drawing:['中线','眼线','鼻底','嘴线','动漫/Q版参数'],
-    practice:['转头后重放锚点','眼睛挂在曲面上','调风格但保持坐标一致']},
-  {id:'nature', icon:'🌬️', name:'自然流域', core:'风、水、烟、云是力场留下的痕迹。', color:'#5fb6bd',
-    real:['风不可见但能改变物体','水有反射/折射/流线','烟会扩散和破碎'],
-    science:['流场','密度场','粒子轨迹','运动线索'],
-    drawing:['风向线','水流线','烟的边缘破碎','云的体积块'],
-    practice:['通过衣摆推风向','画水绕石头','烟上升扩散','树枝分形']},
-  {id:'style', icon:'✨', name:'风格云城', core:'风格是信息选择与压缩策略。', color:'#f5b94f',
-    real:['感受会改变注意力','观者根据线形色光重建情绪'],
-    science:['视觉认知','形式心理学','参数化风格'],
-    drawing:['线条粗细','色彩倾向','构图空间','明暗对比'],
-    practice:['孤独/紧张/温暖生成视觉参数','写实→动漫→Q版','形成个人风格卡']}
-];
+  const quests = [
+    {id:'quest-room', title:'画一个盒子房间', icon:'🏠', output:'透视房间知识卡', calls:['结构','坐标','相机','深度','光影','材质','风格'], desc:'第一个完整跨岛任务：用房间验证世界管线。'},
+    {id:'quest-face', title:'画一个转头动漫人物', icon:'🙂', output:'头部坐标与风格卡', calls:['结构','坐标','相机','深度','表面','光影','材质','风格'], desc:'从头部体块到动漫化，重点是五官挂在同一坐标系。'},
+    {id:'quest-cloth', title:'画一块可信布料', icon:'🧣', output:'褶皱力线卡', calls:['结构','力学','表面','光影','材质','压缩'], desc:'找固定点、张力、材料硬度，再决定保留哪些褶皱。'},
+    {id:'quest-feeling', title:'把一种感受变成图像', icon:'💭', output:'视觉情绪参数卡', calls:['风格','相机','深度','光影','材质','压缩'], desc:'将感受翻译为线条、颜色、空间、构图和明暗。'}
+  ];
 
-const missions = [
-  {name:'画一个转头动漫人物', steps:['比例森林：放头顶、下巴、眼线、鼻底、嘴线','相机塔：确定 3/4、俯视或仰视','人形剧场：头部球体旋转，中线随曲面弯','光之月台：判断额头、鼻梁、脸颊、下巴明暗','材质星市：皮肤固有色、亮部、暗部、腮红','风格云城：放大眼睛但保持坐标一致']},
-  {name:'画一块可信的布料', steps:['线之海：区分轮廓线、结构线、褶皱线','褶皱山谷：找固定点和张力方向','光之月台：峰谷产生明暗变化','材质星市：选择丝绸/棉布/牛仔/皮革','风格云城：决定保留几条主褶皱线']},
-  {name:'画一个有空间感的房间', steps:['相机塔：选择一点或两点透视','深度湖：分前景、中景、远景','线之海：用结构线组织家具边界','光之月台：找窗光和投影','材质星市：区分木头、布、玻璃','风格云城：决定温暖/孤独/梦幻的视觉参数']},
-  {name:'把感受变成图像', steps:['选择感受：安静、紧张、孤独、温暖、梦','风格云城：生成线条/色彩/空间参数','相机塔：选择观看方式','光之月台：选择柔光或强阴影','材质星市：选择色彩压缩方式','绘画台：输出一张视觉情绪卡']}
-];
+  const concepts = [
+    {id:'fov', term:'FOV / 视场角', island:'相机岛', plain:'相机一次能看见多宽。越大越广角，近大远小越强。', computer:'Camera Field of View / Focal Length', drawing:'决定透视夸张程度：广角紧张，长焦安静。', lab:'lab-camera'},
+    {id:'vanish', term:'Vanishing Point / 消失点', island:'相机岛', plain:'空间中一组平行线在画面里汇聚的位置。', computer:'Projection of parallel directions', drawing:'检查盒子、房间、街道是否在同一透视系统。', lab:'lab-camera'},
+    {id:'depth', term:'Depth Map / 深度图', island:'深度岛', plain:'每个点离相机多远的地图。', computer:'Z-buffer / depth estimation', drawing:'先分远近，不要把阴影当深度。', lab:'lab-depth'},
+    {id:'normal', term:'Normal / 法线', island:'表面岛', plain:'表面朝向的小箭头。', computer:'Normal vector / normal map', drawing:'光影跟体块转向有关，明暗交界线沿法线变化。', lab:'lab-light'},
+    {id:'diffuse', term:'Diffuse / 漫反射', island:'光影岛', plain:'光打到粗糙表面后向四周散开。', computer:'Lambert shading', drawing:'决定大面积明暗，不等于高光。', lab:'lab-light'},
+    {id:'roughness', term:'Roughness / 粗糙度', island:'材质岛', plain:'表面微小凹凸的混乱程度。', computer:'Material roughness', drawing:'高光越粗糙越大、越软、越暗。', lab:'lab-material'},
+    {id:'ao', term:'AO / 环境光遮蔽', island:'光影岛', plain:'缝隙、接触处接收不到散射光，所以更暗。', computer:'Ambient Occlusion', drawing:'眼角、嘴角、衣褶深处的暗部来源。', lab:'lab-light'},
+    {id:'tension', term:'Tension / 张力线', island:'力学岛', plain:'布、头发、飘带被拉扯的方向。', computer:'Constraint + force direction', drawing:'褶皱线应该从固定点和受力方向生成。', lab:'lab-force'},
+    {id:'compression', term:'Information Compression / 信息压缩', island:'压缩岛', plain:'从复杂现实里保留最重要的视觉信息。', computer:'Feature extraction / abstraction', drawing:'漫画、动漫、图解都是不同压缩策略。', lab:'lab-style'}
+  ];
 
-const glossary = [
-  {t:'Pinhole Camera 针孔相机', tag:['CV','透视'], plain:'把世界上的三维点，通过一个小孔投到平面上。', use:'解释近大远小、视平线和消失点。', try:'拖 FOV，看盒子透视如何变强。'},
-  {t:'FOV 视场角', tag:['相机','透视'], plain:'相机能看到多宽。FOV 大像广角，FOV 小像长焦。', use:'决定画面夸张程度和空间压缩感。', try:'同一头部用广角和长焦各画一次。'},
-  {t:'Vanishing Point 消失点', tag:['投影几何'], plain:'空间中一组平行线在画面里汇聚的方向终点。', use:'检查盒子、房间、街道是否透视一致。', try:'延长所有水平边，看它们是否汇到同一点。'},
-  {t:'Depth Map 深度图', tag:['CV','空间'], plain:'每个像素到相机的距离图。', use:'把远近关系和阴影分开。', try:'只用三层颜色标出前景/中景/远景。'},
-  {t:'Normal 法线', tag:['CG','光影'], plain:'表面朝向的箭头。', use:'决定这个面会不会被主光照亮。', try:'在球、鼻子、衣褶峰谷上画小箭头。'},
-  {t:'Diffuse 漫反射', tag:['CG','明暗'], plain:'光打到粗糙表面后向四周散开。', use:'解释大多数素描明暗的基础。', try:'先忽略高光，只画表面朝光程度。'},
-  {t:'Specular 高光', tag:['CG','材质'], plain:'镜面方向的反射。材质越光滑，高光越集中。', use:'区分金属、塑料、皮肤、玻璃。', try:'调粗糙度，看高光从尖变散。'},
-  {t:'BRDF 双向反射分布函数', tag:['CG','材质'], plain:'描述光从某方向来、往某方向反射多少的规则。', use:'把材质从“背口诀”变成参数理解。', try:'比较石膏、金属、布料的高光和暗部。'},
-  {t:'Fresnel 菲涅尔', tag:['光学'], plain:'视线越贴着表面看，反射越强。', use:'解释水面、玻璃、皮肤边缘反光。', try:'给球体边缘加弱反光，不要随便全亮。'},
-  {t:'AO 环境光遮蔽', tag:['CG','暗部'], plain:'缝隙里来自环境的散射光更少，所以更暗。', use:'解释嘴角、眼角、衣褶深处的暗。', try:'只给接缝和褶皱谷加 AO，不要把整个暗面涂死。'},
-  {t:'Triangulation 三角测量', tag:['CV','多视角'], plain:'用多个视角的对应点推断空间位置。', use:'解释为什么画人要看正面、侧面、3/4。', try:'用正面和侧面推断鼻尖在 45° 的位置。'},
-  {t:'Topology 拓扑', tag:['建模','结构'], plain:'点、边、面如何连接。', use:'解释结构线和体块连续性。', try:'给头部画眼眶、嘴部、下颌的环线。'},
-  {t:'Mesh 网格', tag:['建模'], plain:'由很多顶点、边、面组成的三维表面。', use:'把复杂对象拆成可理解的面。', try:'把苹果、杯子、脸想象成低模网格。'},
-  {t:'NURBS 曲面', tag:['建模'], plain:'用控制点生成平滑曲面的数学方法。', use:'理解流畅轮廓、车身、花瓶、人体大曲线。', try:'用少数控制线概括长曲线。'},
-  {t:'Shader 着色器', tag:['CG'], plain:'告诉计算机每个像素应该是什么颜色的程序。', use:'把颜色拆成固有色、光、材质、阴影。', try:'画一张图时分层标注 albedo/diffuse/specular。'},
-  {t:'Parametric Modeling 参数化建模', tag:['建模','风格'], plain:'改变参数就改变模型。', use:'解释动漫/Q版比例和个人风格。', try:'调头身比、眼睛大小、线条粗细，看信息如何压缩。'}
-];
+  const questRoomSteps = [
+    {title:'1 结构：房间是盒体', island:'结构岛', task:'先把房间看成一个打开的盒子：地面、两面墙、天花板。', output:'房间结构卡'},
+    {title:'2 坐标：家具落在同一地面', island:'坐标岛', task:'用地面网格检查桌子、窗户、地毯是否共享坐标。', output:'坐标对齐卡'},
+    {title:'3 相机：选择一点或两点透视', island:'相机岛', task:'拖动 FOV 和视平线，看空间压缩如何改变情绪。', output:'透视选择卡'},
+    {title:'4 深度：分前中后景', island:'深度岛', task:'把房间拆成前景家具、中景人物、远景窗户。', output:'深度层卡'},
+    {title:'5 光影：窗光和 AO', island:'光影岛', task:'确定窗光方向，找墙角、桌脚、家具接触处的 AO。', output:'房间光影卡'},
+    {title:'6 风格：温暖/孤独/梦幻', island:'风格岛', task:'选择感受，决定视角、颜色、留白和阴影强度。', output:'空间风格卡'}
+  ];
 
-const explanations = {
-  projection:{title:'相机塔讲解：透视是成像，不是口诀', html:`<p>透视的本质是三维点投到二维平面。欧洲美术中的一点、两点、三点透视，是不同空间方向在画面上汇聚的结果。</p><div class="mini"><strong>现实：</strong>离相机越近，同样大小的物体占据画面越大。</div><div class="mini"><strong>计算机：</strong>三维坐标经过投影矩阵，得到屏幕坐标。</div><div class="mini"><strong>绘画：</strong>视平线、消失点、焦距、广角/长焦，都是观看世界的方式。</div><h4>练习方法</h4><p>先画一个盒子，不追求好看，只检查三组边是否分别指向正确方向。然后改变 FOV，观察同一个盒子怎样变得夸张或平稳。</p>`},
-  light:{title:'光之月台讲解：明暗交界线如何生成', html:`<p>明暗交界线是体块转向的结果。它不是一条随意的暗边，而是表面逐渐转到主光照不到的位置。</p><div class="mini"><strong>现实：</strong>表面朝光更亮，背光更暗，缝隙更暗。</div><div class="mini"><strong>计算机：</strong>最基础的漫反射可理解为表面法线与光线方向的点积。</div><div class="mini"><strong>绘画：</strong>先判断大体块的朝向，再画半调子、核心暗部、反光、AO。</div><h4>练习方法</h4><p>每次画阴影前先画小法线箭头：额头朝哪里？鼻梁朝哪里？脸颊朝哪里？这样暗部才会跟体积一致。</p>`},
-  fold:{title:'褶皱山谷讲解：褶皱是力的地图', html:`<p>褶皱不是随机线条。它由固定点、重力、拉力、压缩和材料硬度共同生成。</p><div class="mini"><strong>现实：</strong>布料挂在哪里，哪里就会聚集力；自由端会下垂或被风带走。</div><div class="mini"><strong>计算机：</strong>可以用约束点、弹簧、粒子和材质刚度模拟。</div><div class="mini"><strong>绘画：</strong>固定点附近线密，张力方向线长，压缩处线碎，硬布折线多，软布曲线多。</div>`},
-  face:{title:'人形剧场讲解：五官必须挂在头部坐标系上', html:`<p>人脸画错常常不是眼睛本身画错，而是眼睛没有跟着头部体块转。眼睛、鼻子、嘴巴都必须依附在同一个头部坐标系。</p><div class="mini"><strong>现实：</strong>头部像一个带面部平面的体块，五官嵌在曲面上。</div><div class="mini"><strong>计算机：</strong>可理解为参数化头部代理模型：中心线、眼线、鼻底线、嘴线随旋转变化。</div><div class="mini"><strong>绘画：</strong>动漫化可以夸张比例，但不能让五官脱离结构。</div>`},
-  material:{title:'材质星市讲解：颜色是渲染结果', html:`<p>颜色不是单独挑出来的漂亮色。它是固有色、光源色、环境色、表面朝向、高光和材质参数共同作用的结果。</p><div class="mini"><strong>现实：</strong>皮肤、金属、玻璃、布料对光的反应不同。</div><div class="mini"><strong>计算机：</strong>材质通常由 albedo、roughness、metalness、specular、fresnel 等参数描述。</div><div class="mini"><strong>绘画：</strong>先想材质，再决定高光大小、暗部颜色、边缘反光和色块压缩方式。</div>`},
-  style:{title:'风格云城讲解：感受如何变成图像', html:`<p>感受不是直接画出来的，它要被翻译成视觉参数：线条、颜色、比例、空间、明暗、节奏。</p><div class="mini"><strong>现实：</strong>感受会改变我们注意哪些信息。</div><div class="mini"><strong>认知：</strong>观者通过形状、色彩、对比和构图重建情绪。</div><div class="mini"><strong>绘画：</strong>风格就是保留什么、删掉什么、夸张什么。</div>`}
-};
+  const inspectors = {
+    hub:{title:'Hub 世界入口', reality:'你在选择今天探索哪一层世界。', computer:'像游戏主菜单：地图、进度、任务、数据库。', drawing:'先确定学习目标，不在知识里迷路。', action:'打开地图，进入一个岛或任务。'},
+    pipeline:{title:'世界管线', reality:'现实不是直接变成画，而是逐层被拆解。', computer:'类似 CG 渲染管线和 CV 分析管线。', drawing:'每一笔都应该知道自己属于结构、深度、光影、材质还是风格。', action:'点击任一管线阶段，查看它连接的岛屿。'},
+    islands:{title:'知识岛屿', reality:'每座岛只负责一种核心问题。', computer:'像软件模块，各司其职。', drawing:'避免透视、光影、材质、人脸混成一团。', action:'进入岛屿后按 L1-L4 递进。'},
+    quests:{title:'跨岛任务', reality:'真实绘画问题需要多个知识共同工作。', computer:'像项目工作流：多个模块被调用。', drawing:'画房间、人脸、布料、情绪，都是跨岛任务。', action:'先做盒子房间，验证基础管线。'},
+    labs:{title:'实验室', reality:'一个变量一次看清。', computer:'小型模拟器。', drawing:'把术语变成可预测的变化。', action:'选概念实验，再保存输出卡。'},
+    glossary:{title:'术语星典', reality:'复杂词汇需要被翻译成绘画动作。', computer:'CV / CG / Blender / 绘画术语互译。', drawing:'知道一个词如何改变你的观察和下笔。', action:'搜索术语，进入对应实验。'},
+    studio:{title:'信息整合绘画台', reality:'所有知识最终要回到画面。', computer:'参考图、图层、辅助线和输出。', drawing:'用透视、深度、光源、头部坐标辅助自己画。', action:'选择辅助层，画出一张练习。'},
+    memory:{title:'个人压缩数据库', reality:'绘画经验是不断积累的可调取模式。', computer:'像个人知识库和素材库。', drawing:'保存结构、错误、风格、练习，形成自己的绘画记忆。', action:'复盘卡片，找最常见错误。'}
+  };
 
-const emotions = {
-  calm:{name:'安静', line:'长线、少断裂、低速度', color:'#8fb7a1', space:'留白多，水平构图', light:'柔光、低对比'},
-  tension:{name:'紧张', line:'尖线、碎线、斜向力', color:'#e96f63', space:'倾斜、压迫、近景', light:'强阴影、高对比'},
-  lonely:{name:'孤独', line:'细线、小人物、大空白', color:'#708bb7', space:'远景、大尺度空间', light:'冷光、弱反光'},
-  warm:{name:'温暖', line:'圆线、包围、柔边缘', color:'#f0b36b', space:'近中景、围合构图', light:'暖光、柔暗部'},
-  dream:{name:'梦', line:'漂浮线、弱重力、渐变', color:'#b59cf2', space:'弱透视、非现实比例', light:'边缘光、雾化'}
-};
-let activeEmotion = 'calm';
-let selectedIsland = 'camera';
+  function setRoute(route, sub=null){
+    state.route = route; state.sub = sub;
+    render();
+  }
+  function saveProgress(){ localStorage.setItem('drawescape.v10.progress', JSON.stringify(state.progress)); }
+  function saveMemory(card){
+    state.memory.unshift({...card, time:new Date().toLocaleString()});
+    state.memory = state.memory.slice(0,80);
+    localStorage.setItem(storeKey, JSON.stringify(state.memory));
+    toast('已保存到压缩数据库');
+    renderMemoryIfNeeded();
+  }
+  function toast(msg){
+    const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),1700);
+  }
 
-function initUI(){
-  document.querySelectorAll('[data-jump]').forEach(btn=>btn.addEventListener('click',()=>$(btn.dataset.jump).scrollIntoView({behavior:'smooth'})));
-  $('toggleCalm').addEventListener('click',()=>document.body.classList.toggle('calm'));
-  $('expandAll').addEventListener('click',()=>{ document.querySelectorAll('.island').forEach(x=>x.classList.add('active')); renderKnowledge(selectedIsland); });
-  $('collapseAll').addEventListener('click',()=>document.querySelectorAll('.island').forEach(x=>x.classList.remove('active')));
-  $('closeDrawer').addEventListener('click',closeDrawer); $('drawerBack').addEventListener('click',closeDrawer);
-  document.querySelectorAll('[data-read]').forEach(b=>b.addEventListener('click',()=>openDrawer(b.dataset.read)));
-  $('glossarySearch').addEventListener('input',renderGlossary);
-}
+  function getCrumbs(){
+    if(state.route.startsWith('island-')){const id=state.route.replace('island-','');const i=islands.find(x=>x.id===id);return `Drawescape / 知识岛屿 / ${i?.title||id}`;}
+    if(state.route.startsWith('quest-')){const q=quests.find(x=>x.id===state.route);return `Drawescape / 跨岛任务 / ${q?.title||state.route}`;}
+    if(state.route.startsWith('lab-'))return `Drawescape / 实验室 / ${labTitle(state.route)}`;
+    const names={hub:'Hub',pipeline:'世界管线',islands:'知识岛屿',quests:'跨岛任务',labs:'实验室',glossary:'术语星典',studio:'绘画台',memory:'压缩数据库'};
+    return `Drawescape / ${names[state.route]||state.route}`;
+  }
 
-function renderStatic(){
-  $('pipelineCards').innerHTML = pipeline.map(p=>`<article class="pipe-card" style="--accent:${p.c}"><b>${p.t}</b><small>${p.en}</small><span>${p.d}</span></article>`).join('');
-  $('islandMap').innerHTML = islands.map(i=>`<article class="island ${i.id===selectedIsland?'active':''}" data-island="${i.id}" style="--accent:${i.color}"><div class="icon">${i.icon}</div><h3>${i.name}</h3><p>${i.core}</p><small>点击查看：现实 → 科学 → 绘画 → 练习</small></article>`).join('');
-  document.querySelectorAll('.island').forEach(el=>el.addEventListener('click',()=>{selectedIsland=el.dataset.island;document.querySelectorAll('.island').forEach(x=>x.classList.remove('active'));el.classList.add('active');renderKnowledge(selectedIsland);}));
-  $('missionGrid').innerHTML = missions.map(m=>`<article class="mission"><h3>${m.name}</h3><ol>${m.steps.map(s=>`<li>${s}</li>`).join('')}</ol></article>`).join('');
-  renderKnowledge(selectedIsland); renderGlossary(); renderEmotionTabs();
-}
-function renderKnowledge(id){
-  const i = islands.find(x=>x.id===id) || islands[0];
-  $('knowledgePanel').innerHTML = `<article class="principle-card"><h3>${i.icon} ${i.name}：${i.core}</h3><div class="matrix"><div class="col"><b>现实中它是什么？</b><ul>${i.real.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>知识如何解释？</b><ul>${i.science.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>绘画如何压缩？</b><ul>${i.drawing.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>如何练习校准？</b><ul>${i.practice.map(x=>`<li>${x}</li>`).join('')}</ul></div></div></article>`;
-}
-function renderGlossary(){
-  const q = $('glossarySearch').value.trim().toLowerCase();
-  const items = glossary.filter(g=>!q || [g.t,g.plain,g.use,g.try,...g.tag].join(' ').toLowerCase().includes(q));
-  $('glossaryGrid').innerHTML = items.map(g=>`<article class="term"><h3>${g.t}</h3><div>${g.tag.map(t=>`<span class="tag">${t}</span>`).join('')}</div><p><strong>通俗解释：</strong>${g.plain}</p><p><strong>绘画用途：</strong>${g.use}</p><p><strong>试一试：</strong>${g.try}</p></article>`).join('');
-}
-function openDrawer(key){
-  const e = explanations[key]; if(!e) return;
-  $('drawerTitle').textContent = e.title; $('drawerBody').innerHTML = e.html;
-  $('drawer').classList.add('show'); $('drawer').setAttribute('aria-hidden','false'); $('drawerBack').classList.add('show');
-}
-function closeDrawer(){ $('drawer').classList.remove('show'); $('drawer').setAttribute('aria-hidden','true'); $('drawerBack').classList.remove('show'); }
-function renderEmotionTabs(){
-  $('emotionTabs').innerHTML = Object.entries(emotions).map(([k,e])=>`<button class="${k===activeEmotion?'active':''}" data-emotion="${k}">${e.name}</button>`).join('');
-  document.querySelectorAll('[data-emotion]').forEach(b=>b.addEventListener('click',()=>{activeEmotion=b.dataset.emotion;renderEmotionTabs();drawStyle();}));
-}
+  function updateShell(){
+    $$('#breadcrumb').forEach(x=>x.textContent=getCrumbs());
+    $$('.topnav button').forEach(b=>b.classList.toggle('active', b.dataset.route===baseRoute(state.route)));
+    renderLocalNav();
+    renderInspector();
+    $('#questStatus').textContent = statusText();
+  }
+  function baseRoute(r){ if(r.startsWith('island-'))return 'islands'; if(r.startsWith('quest-'))return 'quests'; if(r.startsWith('lab-'))return 'labs'; return r; }
+  function statusText(){
+    if(state.route==='hub') return '目标：从地图选择一个岛屿，或继续盒子房间任务。';
+    if(state.route.startsWith('quest-')) return `任务进行中：${quests.find(q=>q.id===state.route)?.title||''} / Step ${state.currentQuestStep+1}`;
+    if(state.route.startsWith('island-')) return '岛屿学习：按 L1 识别 → L2 预测 → L3 生成 → L4 迁移。';
+    if(state.route.startsWith('lab-')) return '实验室：每次只调一个变量，观察它如何改变绘画判断。';
+    return '提示：按 M 打开快速地图。';
+  }
+  function renderInspector(){
+    let data = inspectors[baseRoute(state.route)] || inspectors.hub;
+    if(state.route.startsWith('island-')){
+      const i=islands.find(x=>x.id===state.route.replace('island-',''));
+      data={title:i.title,reality:i.core,computer:`对应：${i.duty}`,drawing:'这一岛只负责一个主问题，跨岛任务会调用它。',action:'完成 L1-L4：识别、预测、生成、迁移。'};
+    } else if(state.route.startsWith('quest-')){
+      const q=quests.find(x=>x.id===state.route);
+      data={title:q.title,reality:q.desc,computer:`调用模块：${q.calls.join(' / ')}`,drawing:`输出：${q.output}`,action:'按左侧步骤推进，每步保存一张卡。'};
+    } else if(state.route.startsWith('lab-')){
+      data=labInspector(state.route);
+    }
+    $('#inspector').innerHTML = ['reality','computer','drawing','action'].map((k,idx)=>{
+      const label=['现实问题','计算机/建模','绘画转译','现在操作'][idx];
+      return `<div class="inspect-block"><b>${label}</b><p>${data[k]}</p></div>`;
+    }).join('');
+  }
+  function renderLocalNav(){
+    const box=$('#localNav');
+    if(state.route.startsWith('island-')){
+      const id=state.route.replace('island-',''); const i=islands.find(x=>x.id===id);
+      box.innerHTML = `<button class="active"><span>${i.icon} ${i.title} 总平面</span><small>${i.core}</small></button>` + i.levels.map((l,idx)=>`<button data-level="${idx}"><span>L${idx+1} ${['识别','预测','生成','迁移'][idx]}</span><small>${l}</small></button>`).join('') + `<button data-route="labs"><span>进入相关实验</span><small>用变量观察原理。</small></button>`;
+    } else if(state.route.startsWith('quest-')){
+      box.innerHTML = questRoomSteps.map((s,idx)=>`<button class="${idx===state.currentQuestStep?'active':''}" data-qstep="${idx}"><span>${s.title}</span><small>${s.island} · ${s.output}</small></button>`).join('');
+    } else if(state.route==='pipeline'){
+      box.innerHTML = pipeline.map(p=>`<button data-pipe="${p.id}"><span>${p.icon} ${p.title}</span><small>${p.short}</small></button>`).join('');
+    } else if(state.route==='labs'){
+      box.innerHTML = ['lab-camera','lab-depth','lab-light','lab-material','lab-force','lab-style'].map(id=>`<button data-route="${id}"><span>${labTitle(id)}</span><small>概念实验</small></button>`).join('');
+    } else {
+      box.innerHTML = [
+        ['pipeline','世界管线','现实如何变成画'],['islands','知识岛屿','十个核心问题'],['quests','跨岛任务','把知识串起来'],['labs','实验室','变量与反馈'],['glossary','术语星典','名词互译'],['studio','绘画台','输出练习'],['memory','压缩数据库','保存经验']
+      ].map(x=>`<button data-route="${x[0]}"><span>${x[1]}</span><small>${x[2]}</small></button>`).join('');
+    }
+  }
 
-function drawCover(){
-  const c=$('coverCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; let t=0;
-  function frame(){
-    t+=0.01; ctx.clearRect(0,0,w,h);
-    const g=ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,'#08132f'); g.addColorStop(.45,'#174a93'); g.addColorStop(.75,'#8e70f2'); g.addColorStop(1,'#ffd166'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
-    ctx.save(); ctx.translate(w*.55,h*.52); ctx.rotate(Math.sin(t)*.05);
-    for(let z=0;z<7;z++){ctx.strokeStyle=`rgba(255,255,255,${.08+z*.035})`; ctx.lineWidth=1; ctx.beginPath(); const s=70+z*35; ctx.moveTo(-s,-s*.7); ctx.lineTo(s,-s*.45); ctx.lineTo(s*.78,s*.7); ctx.lineTo(-s*.86,s*.5); ctx.closePath(); ctx.stroke();}
-    ctx.restore();
-    for(let i=0;i<60;i++){const x=(Math.sin(i*91+t*.9)*.5+.5)*w; const y=(Math.cos(i*37+t*.7)*.5+.5)*h; ctx.fillStyle=`rgba(255,255,255,${.2+(i%7)*.08})`; ctx.beginPath(); ctx.arc(x,y,(i%3)+1,0,TAU); ctx.fill();}
-    ctx.strokeStyle='rgba(255,255,255,.72)'; ctx.lineWidth=2; ctx.beginPath();
-    for(let i=0;i<140;i++){const x=80+i*4; const y=280+Math.sin(i*.13+t*2)*40+Math.sin(i*.05)*22; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);} ctx.stroke();
-    requestAnimationFrame(frame);
-  } frame();
-}
+  function render(){
+    updateShell();
+    const view=$('#routeView');
+    if(state.route==='hub') view.innerHTML = hubHTML();
+    else if(state.route==='pipeline') view.innerHTML = pipelineHTML();
+    else if(state.route==='islands') view.innerHTML = islandsHTML();
+    else if(state.route.startsWith('island-')) view.innerHTML = islandHTML(state.route.replace('island-',''));
+    else if(state.route==='quests') view.innerHTML = questsHTML();
+    else if(state.route.startsWith('quest-')) view.innerHTML = questHTML(state.route);
+    else if(state.route==='labs') view.innerHTML = labsHTML();
+    else if(state.route.startsWith('lab-')) view.innerHTML = labHTML(state.route);
+    else if(state.route==='glossary') view.innerHTML = glossaryHTML();
+    else if(state.route==='studio') view.innerHTML = studioHTML();
+    else if(state.route==='memory') view.innerHTML = memoryHTML();
+    bindRouteEvents();
+    afterRender();
+  }
 
-function projectPoint(p, yaw, pitch, fov, depth, w, h){
-  let [x,y,z]=p; z+=depth;
-  const cy=Math.cos(yaw), sy=Math.sin(yaw); let x1=x*cy-z*sy, z1=x*sy+z*cy;
-  const cp=Math.cos(pitch), sp=Math.sin(pitch); let y1=y*cp-z1*sp, z2=y*sp+z1*cp;
-  const f=(w*.55)/Math.tan(fov/2); const s=f/(z2+0.001);
-  return {x:w/2+x1*s, y:h/2-y1*s, z:z2, s};
-}
-function drawProjection(){
-  const c=$('projectionCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height;
-  const yaw=+$('projYaw').value*Math.PI/180, pitch=+$('projPitch').value*Math.PI/180, fov=+$('projFov').value*Math.PI/180, depth=+$('projDepth').value;
-  ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
-  const pts=[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
-  const ps=pts.map(p=>projectPoint(p,yaw,pitch,fov,depth,w,h)); const edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
-  ctx.strokeStyle='rgba(74,143,214,.18)'; ctx.lineWidth=1;
-  for(const [a,b] of [[0,1],[3,2],[4,5],[7,6],[0,3],[1,2],[4,7],[5,6]]){extendLine(ctx,ps[a],ps[b],w,h)}
-  ctx.strokeStyle='#24313a'; ctx.lineWidth=4; ctx.lineJoin='round'; edges.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(ps[a].x,ps[a].y);ctx.lineTo(ps[b].x,ps[b].y);ctx.stroke();});
-  ctx.fillStyle='#ee8e8e'; ps.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,5,0,TAU);ctx.fill(); ctx.fillText('P'+i,p.x+7,p.y-7);});
-  ctx.fillStyle='rgba(16,24,39,.82)'; ctx.font='18px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`3D 坐标 → 投影平面｜FOV ${$('projFov').value}°｜Depth ${depth}`,24,34);
-}
-function extendLine(ctx,a,b,w,h){ const dx=b.x-a.x, dy=b.y-a.y; ctx.beginPath(); ctx.moveTo(a.x-dx*20,a.y-dy*20); ctx.lineTo(a.x+dx*20,a.y+dy*20); ctx.stroke(); }
-function drawPaper(ctx,w,h){ ctx.fillStyle='#fffaf0'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='rgba(36,49,58,.06)'; ctx.lineWidth=1; for(let x=0;x<w;x+=32){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();} for(let y=0;y<h;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();} }
+  function hubHTML(){
+    return `<div class="route-page">
+      <section class="hero">
+        <div>
+          <div class="progress-pill">Navigation Quest Edition · V10</div>
+          <h1>Drawescape</h1>
+          <p>一个把现实折叠成画的交互学习游戏。你会像探索地图一样学习：结构、坐标、相机、深度、表面、光影、材质、力学、压缩和风格。</p>
+          <div class="hero-actions">
+            <button class="primary" data-route="quest-room">开始今日一关：盒子房间</button>
+            <button data-action="open-map">打开总平面图</button>
+            <button data-route="pipeline">查看世界管线</button>
+          </div>
+        </div>
+        <div class="hud-card">
+          <div class="stage-label">今日导航台</div>
+          <h2>先做一关，不在知识里迷路</h2>
+          <p>目标：理解“房间 = 盒体 + 相机 + 深度 + 光”。输出一张可保存的透视房间知识卡。</p>
+          <div class="star-grid">
+            <div class="stat"><b>${state.memory.length}</b><span>已保存卡片</span></div>
+            <div class="stat"><b>10</b><span>知识岛屿</span></div>
+            <div class="stat"><b>4</b><span>跨岛任务</span></div>
+            <div class="stat"><b>M</b><span>快速地图键</span></div>
+          </div>
+        </div>
+      </section>
+      <section class="section-title"><div><h2>三种入口</h2><p>按目标进入，而不是在页面里迷路。</p></div></section>
+      <div class="grid">
+        <article class="card"><h3>我想理解一个原理</h3><p>进入知识岛屿：例如 FOV、深度图、法线、明暗交界线、粗糙度。</p><button data-route="islands">进入岛屿地图</button></article>
+        <article class="card"><h3>我想画一个东西</h3><p>进入跨岛任务：房间、人脸、布料、水边场景。任务会自动调用相关岛屿。</p><button data-route="quests">进入任务地图</button></article>
+        <article class="card"><h3>我想表达一种感受</h3><p>进入风格岛：把安静、紧张、孤独、温暖、梦幻翻译成视觉参数。</p><button data-route="lab-style">进入风格实验</button></article>
+      </div>
+    </div>`;
+  }
+  function pipelineHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>世界管线</h2><p>固定主脊柱：现实如何一步步变成画。</p></div><button data-action="open-map">地图</button></section><div class="mapline">${pipeline.map((p,idx)=>`<div class="node-row" data-pipe="${p.id}"><div class="node-index">${idx+1}</div><div><b>${p.icon} ${p.title}</b><small>${p.short}｜${p.computer} → ${p.drawing}</small></div><button data-pipe-open="${p.id}">检查</button></div>`).join('')}</div></div>`;
+  }
+  function islandsHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>知识岛屿</h2><p>每座岛只负责一个主问题，避免混合。</p></div><button data-action="open-map">地图</button></section><div class="grid">${islands.map(i=>`<article class="card"><h3>${i.icon} ${i.title}</h3><p><b>${i.core}</b><br>${i.duty}</p><div class="tagrow">${i.levels.map((l,idx)=>`<span class="tag">L${idx+1} ${l}</span>`).join('')}</div><button data-route="island-${i.id}">进入岛屿</button></article>`).join('')}</div></div>`;
+  }
+  function islandHTML(id){
+    const i=islands.find(x=>x.id===id) || islands[0];
+    const related = concepts.filter(c=>c.island===i.title).concat(concepts.filter(c=>c.island.includes(i.title.replace('岛','')))).slice(0,4);
+    return `<div class="route-page padded"><section class="section-title"><div><h2>${i.icon} ${i.title}</h2><p>${i.core}</p></div><button data-action="open-map">总平面</button></section><div class="split"><div class="card"><h3>岛屿主责边界</h3><p>${i.duty}</p><div class="mapline">${i.levels.map((l,idx)=>`<div class="node-row"><div class="node-index">L${idx+1}</div><div><b>${['识别','预测','生成','迁移'][idx]}</b><small>${l}</small></div><button data-complete-level="${idx}">标记完成</button></div>`).join('')}</div></div><div class="card"><h3>本岛可深化位置</h3><p>以后新增内容时，只要属于本岛主问题，就添加到这里；否则进入跨岛任务。</p><div class="tagrow">${(related.length?related:concepts.slice(0,3)).map(c=>`<button data-concept="${c.id}">${c.term}</button>`).join('')}</div><div class="output-preview">输出目标：完成本岛任意关卡后，保存“${i.title}理解卡”。</div></div></div></div>`;
+  }
+  function questsHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>跨岛任务</h2><p>真实绘画问题调用多个岛屿，任务负责串联。</p></div><button data-action="open-map">地图</button></section><div class="grid">${quests.map(q=>`<article class="card"><h3>${q.icon} ${q.title}</h3><p>${q.desc}</p><div class="tagrow">${q.calls.map(c=>`<span class="tag">${c}</span>`).join('')}</div><button data-route="${q.id}">进入任务</button><small class="hint">输出：${q.output}</small></article>`).join('')}</div></div>`;
+  }
+  function questHTML(id){
+    const q=quests.find(x=>x.id===id) || quests[0];
+    if(id!=='quest-room'){
+      return `<div class="route-page padded"><section class="section-title"><div><h2>${q.icon} ${q.title}</h2><p>${q.desc}</p></div><button data-route="quests">返回任务地图</button></section><div class="card"><h3>任务骨架已预留</h3><p>V10 先完整实现“盒子房间”。这个任务后续会按同样结构加入详细关卡。</p><div class="tagrow">${q.calls.map(c=>`<span class="tag">${c}</span>`).join('')}</div><button data-route="quest-room">先做盒子房间</button></div></div>`;
+    }
+    const s=questRoomSteps[state.currentQuestStep];
+    return `<div class="route-page padded"><section class="section-title"><div><h2>🏠 任务：画一个盒子房间</h2><p>第一个完整跨岛任务：用房间验证结构、坐标、相机、深度、光影、材质、风格。</p></div><button data-route="quests">任务地图</button></section><div class="lab-wrap"><div class="canvas-card"><canvas id="questCanvas" width="880" height="520"></canvas></div><div class="controls"><div class="card"><h3>${s.title}</h3><p>${s.task}</p><div class="tagrow"><span class="tag">${s.island}</span><span class="tag">输出：${s.output}</span></div><button class="primary" data-check-quest>检查这一步</button><button data-save-step>保存本步卡片</button></div><div class="card"><h3>步骤导航</h3><div class="quest-steps">${questRoomSteps.map((st,idx)=>`<button class="${idx===state.currentQuestStep?'active':''}" data-qstep="${idx}"><b>${st.title}</b><small>${st.island}</small></button>`).join('')}</div></div></div></div></div>`;
+  }
+  function labsHTML(){
+    const labs=['lab-camera','lab-depth','lab-light','lab-material','lab-force','lab-style'];
+    return `<div class="route-page padded"><section class="section-title"><div><h2>实验室</h2><p>概念实验：一次只调一个变量，理解它如何改变绘画判断。</p></div></section><div class="grid">${labs.map(id=>`<article class="card"><h3>${labTitle(id)}</h3><p>${labInspector(id).reality}</p><button data-route="${id}">进入实验</button></article>`).join('')}</div></div>`;
+  }
+  function labHTML(id){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>${labTitle(id)}</h2><p>${labInspector(id).action}</p></div><button data-route="labs">实验室地图</button></section><div class="lab-wrap"><div class="canvas-card"><canvas id="labCanvas" width="860" height="520"></canvas></div><div class="controls" id="labControls"></div></div></div>`;
+  }
+  function labTitle(id){return {'lab-camera':'📷 相机塔：FOV / 透视','lab-depth':'🌊 深度湖：前中后景','lab-light':'💡 光之月台：明暗交界线','lab-material':'🧪 材质星市：粗糙度与高光','lab-force':'🌬️ 褶皱山谷：固定点与张力','lab-style':'🌈 风格云城：感受转译'}[id]||id;}
+  function labInspector(id){
+    const map={
+      'lab-camera':{reality:'同一个物体，在不同相机视角下会被压缩成不同图像。',computer:'FOV / Perspective Projection / Camera',drawing:'广角夸张，长焦压平；透视也是观看方式。',action:'调 FOV、Depth、Yaw，观察前后边如何变化。'},
+      'lab-depth':{reality:'空间判断先于阴影判断。',computer:'Depth Map / Z-buffer / Occlusion',drawing:'先分前中后景，再上明暗和颜色。',action:'拖动层级强度，观察空间层如何影响画面。'},
+      'lab-light':{reality:'明暗交界线来自表面转向与光源关系。',computer:'Normal · Light / Diffuse / AO',drawing:'暗部跟体块走，不是随便涂黑。',action:'拖动光源角度，预测交界线移动。'},
+      'lab-material':{reality:'不同材质对同一束光反应不同。',computer:'Shader / Roughness / Metallic / Specular',drawing:'高光形状、边缘、强度告诉你材质。',action:'调粗糙度、金属度，看高光如何变。'},
+      'lab-force':{reality:'褶皱是力的地图。',computer:'Constraint / Gravity / Tension / Stiffness',drawing:'先找固定点和受力方向，再画褶皱线。',action:'调重力、硬度和风向，观察主褶皱。'},
+      'lab-style':{reality:'感受要翻译成视觉参数。',computer:'Parameter system / Visual hierarchy',drawing:'线条、色彩、空间、明暗一起表达情绪。',action:'选择感受，生成风格参数卡。'}
+    }; return map[id]||inspectors.labs;
+  }
+  function glossaryHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>术语星典</h2><p>把 CV / CG / Blender / 绘画术语翻译成可操作的绘画判断。</p></div></section><div class="card"><input id="glossSearch" placeholder="搜索：FOV / 法线 / 深度 / 粗糙度..." /></div><div class="glossary-list" id="glossList">${concepts.map(glossItem).join('')}</div></div>`;
+  }
+  function glossItem(c){return `<article class="card glossary-item" data-concept="${c.id}"><h3>${c.term}</h3><p>${c.plain}</p><div class="tagrow"><span class="tag">${c.island}</span><span class="tag">${c.computer}</span></div></article>`;}
+  function studioHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>信息整合绘画台</h2><p>把知识输出到画面：辅助线不是装饰，而是检查系统。</p></div></section><div class="card"><div class="studio-tools"><button data-tool="pen" class="active">画笔</button><button data-tool="eraser">橡皮</button><button data-overlay="perspective">透视辅助</button><button data-overlay="depth">深度三层</button><button data-overlay="head">头部坐标</button><button data-overlay="light">光源箭头</button><button data-action="clear-studio">清空</button><button data-action="export-studio">导出 PNG</button></div><canvas id="studioCanvas" width="980" height="620"></canvas><p class="small-note">建议：选择一个任务步骤，打开对应辅助层，然后只画一类信息。</p></div></div>`;
+  }
+  function memoryHTML(){
+    return `<div class="route-page padded"><section class="section-title"><div><h2>我的压缩数据库</h2><p>绘画经验不是从零开始，而是逐步积累可调取的结构、错误、风格和练习。</p></div><button data-action="clear-memory">清空示例</button></section><div class="memory-list" id="memoryList">${memoryListHTML()}</div></div>`;
+  }
+  function memoryListHTML(){
+    if(!state.memory.length) return `<div class="card"><h3>还没有卡片</h3><p>在任意岛屿、任务或实验里点击“保存当前位置理解”，就会生成一张知识卡。</p></div>`;
+    return state.memory.map((m,idx)=>`<div class="memory-item"><b>${m.title}</b><small>${m.time} · ${m.type||'知识卡'}</small><p>${m.note||''}</p><button data-del-memory="${idx}">删除</button></div>`).join('');
+  }
 
-function hexToRgb(hex){const n=parseInt(hex.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
-function rgbStr(r,g,b,a=1){return `rgba(${Math.round(clamp(r,0,255))},${Math.round(clamp(g,0,255))},${Math.round(clamp(b,0,255))},${a})`;}
-function drawShading(){
-  const c=$('shadingCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
-  const mode=$('shadeMode').value, lx=+$('lightX').value/100, ly=+$('lightY').value/100, rough=+$('roughness').value/100, mat=$('materialType').value;
-  const lz=Math.sqrt(Math.max(0.05,1-lx*lx-ly*ly)); const L=norm([lx,ly,lz]);
-  const albedos={plaster:[230,226,214],skin:[234,168,150],metal:[190,198,205],cloth:[135,160,180]}; const alb=albedos[mat]; const metal=mat==='metal'?0.75:0; const cloth=mat==='cloth'?1:0; const skin=mat==='skin'?1:0;
-  const cx=w/2, cy=h/2+12, r=170; const img=ctx.createImageData(w,h);
-  for(let y=0;y<h;y++){for(let x=0;x<w;x++){const dx=(x-cx)/r, dy=(y-cy)/r, rr=dx*dx+dy*dy; const idx=(y*w+x)*4; if(rr>1){img.data[idx+3]=0; continue;} const z=Math.sqrt(1-rr); const N=norm([dx,-dy,z]); const ndl=Math.max(0,dot(N,L)); const depth=(z+1)/2; const V=[0,0,1]; const H=norm([L[0]+V[0],L[1]+V[1],L[2]+V[2]]); const spec=Math.pow(Math.max(0,dot(N,H)), lerp(8,120,1-rough))*(mat==='plaster'?0.15:mat==='cloth'?0.08:mat==='skin'?0.28:0.95); const fres=Math.pow(1-Math.max(0,dot(N,V)),3); const ao=0.22*Math.pow(1-z,2);
-      let R,G,B;
-      if(mode==='depth'){R=G=B=255*depth;} else if(mode==='normal'){R=(N[0]*.5+.5)*255;G=(N[1]*.5+.5)*255;B=(N[2]*.5+.5)*255;} else if(mode==='diffuse'){R=alb[0]*ndl;G=alb[1]*ndl;B=alb[2]*ndl;} else if(mode==='terminator'){const band=Math.abs(ndl-.08)<.025?1:0; R=alb[0]*(.35+ndl*.6)+band*80;G=alb[1]*(.35+ndl*.6)+band*35;B=alb[2]*(.35+ndl*.6);} else {R=alb[0]*(.18+ndl*.82-ao);G=alb[1]*(.18+ndl*.82-ao);B=alb[2]*(.18+ndl*.82-ao); R+=spec*255 + fres*(mat==='metal'?130:40); G+=spec*235 + fres*(mat==='metal'?150:45); B+=spec*210 + fres*(mat==='metal'?170:60); if(skin){R+=fres*35; G+=fres*8;} if(cloth){const weave=(Math.sin(x*.35)+Math.sin(y*.35))*6; R+=weave;G+=weave;B+=weave;}}
-      img.data[idx]=clamp(R,0,255); img.data[idx+1]=clamp(G,0,255); img.data[idx+2]=clamp(B,0,255); img.data[idx+3]=255; }}
-  ctx.putImageData(img,0,0); ctx.strokeStyle='#101827'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.stroke();
-  ctx.strokeStyle='#ffd166'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(90,85); ctx.lineTo(90+L[0]*80,85-L[1]*80); ctx.stroke(); ctx.fillStyle='#101827'; ctx.fillText('Light vector',105,92);
-}
-function norm(v){const m=Math.hypot(...v)||1;return v.map(x=>x/m)} function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+  function bindRouteEvents(){
+    $$('[data-route]').forEach(btn=>btn.onclick=()=>setRoute(btn.dataset.route));
+    $$('[data-action="open-map"]').forEach(b=>b.onclick=openMap);
+    $$('[data-qstep]').forEach(b=>b.onclick=()=>{state.currentQuestStep=+b.dataset.qstep;render();});
+    $$('[data-check-quest]').forEach(b=>b.onclick=()=>checkQuestStep());
+    $$('[data-save-step]').forEach(b=>b.onclick=()=>{const s=questRoomSteps[state.currentQuestStep];saveMemory({title:s.output,type:'任务步骤卡',note:s.task});});
+    $$('[data-complete-level]').forEach(b=>b.onclick=()=>{toast('已记录：完成本层。下一步请尝试迁移到任务。');});
+    $$('[data-concept]').forEach(b=>b.onclick=()=>openConcept(b.dataset.concept));
+    $$('[data-pipe-open]').forEach(b=>b.onclick=()=>inspectPipe(b.dataset.pipeOpen));
+    $$('[data-pipe]').forEach(b=>b.onclick=()=>inspectPipe(b.dataset.pipe));
+    const gs=$('#glossSearch'); if(gs){gs.oninput=()=>{const q=gs.value.trim().toLowerCase();$('#glossList').innerHTML=concepts.filter(c=>(c.term+c.plain+c.computer+c.drawing).toLowerCase().includes(q)).map(glossItem).join('')||'<div class="card">没有找到。</div>';bindRouteEvents();};}
+    $$('[data-del-memory]').forEach(b=>b.onclick=()=>{state.memory.splice(+b.dataset.delMemory,1);localStorage.setItem(storeKey,JSON.stringify(state.memory));render();});
+    $$('[data-action="clear-memory"]').forEach(b=>b.onclick=()=>{state.memory=[];localStorage.setItem(storeKey,'[]');render();});
+  }
+  function afterRender(){
+    if(state.route==='quest-room') drawQuestCanvas();
+    if(state.route.startsWith('lab-')) setupLab(state.route);
+    if(state.route==='studio') setupStudio();
+  }
+  function inspectPipe(id){
+    const p=pipeline.find(x=>x.id===id); if(!p)return;
+    $('#feedback').innerHTML = `<b>${p.icon} ${p.title}</b><br>${p.short}<br><br><b>计算机对应：</b>${p.computer}<br><b>绘画转译：</b>${p.drawing}`;
+  }
+  function openConcept(id){
+    const c=concepts.find(x=>x.id===id); if(!c)return;
+    $('#feedback').innerHTML = `<b>${c.term}</b><br>${c.plain}<br><br><b>计算机：</b>${c.computer}<br><b>绘画：</b>${c.drawing}<br><br><button data-route="${c.lab}">进入相关实验</button>`;
+    bindRouteEvents();
+  }
 
-function drawFold(){
-  const c=$('foldCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
-  const stiff=+$('clothStiff').value/100, wind=+$('windForce').value/80;
-  const a={x:150,y:82}, b={x:360,y:82}; ctx.fillStyle='#101827'; [a,b].forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,8,0,TAU);ctx.fill();});
-  ctx.strokeStyle='#8f7be8'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.bezierCurveTo(190+wind*40,180,320+wind*40,180,b.x,b.y); ctx.stroke();
-  for(let i=0;i<13;i++){const t=i/12; const x=lerp(a.x,b.x,t)+Math.sin(t*Math.PI*4)*wind*20; const topY=lerp(a.y,b.y,t); const amp=lerp(88,38,stiff)*(0.45+Math.sin(t*Math.PI)*.6); const endY=topY+150+amp*Math.abs(Math.sin(t*Math.PI*3)); const bend=wind*70+(t-.5)*50*(1-stiff); ctx.strokeStyle=i%2?'rgba(36,49,58,.45)':'rgba(201,137,94,.78)'; ctx.lineWidth=i%2?1.5:3; ctx.beginPath(); ctx.moveTo(x,topY); ctx.bezierCurveTo(x+bend*.2,topY+55,x+bend,endY-55,x+bend*.6,endY); ctx.stroke();}
-  ctx.fillStyle='#4d5963'; ctx.fillText('固定点 → 张力线 → 重力下垂 → 材料硬度改变褶皱密度',28,38);
-}
+  function drawQuestCanvas(){
+    const c=$('#questCanvas'); if(!c)return; const ctx=c.getContext('2d'); const w=c.width,h=c.height; ctx.clearRect(0,0,w,h);
+    ctx.fillStyle='#fff8eb';ctx.fillRect(0,0,w,h);
+    // room perspective
+    const cx=w*.52, hy=h*.43; const vp={x:cx,y:hy};
+    ctx.strokeStyle='#d7c4a8';ctx.lineWidth=1;ctx.setLineDash([6,8]);
+    for(let x=60;x<w;x+=80){line(ctx,x,h-40,vp.x,vp.y)}; for(let y=80;y<h-20;y+=70){line(ctx,60,y,vp.x,vp.y);line(ctx,w-60,y,vp.x,vp.y)}
+    ctx.setLineDash([]);ctx.strokeStyle='#263445';ctx.lineWidth=3;line(ctx,90,70,90,h-50);line(ctx,w-90,70,w-90,h-50);line(ctx,90,70,w-90,70);line(ctx,90,h-50,w-90,h-50);line(ctx,90,70,vp.x,vp.y);line(ctx,w-90,70,vp.x,vp.y);line(ctx,90,h-50,vp.x,vp.y);line(ctx,w-90,h-50,vp.x,vp.y);
+    // furniture blocks
+    ctx.strokeStyle='#4267c9';ctx.lineWidth=2;rect(ctx,170,330,150,86);line(ctx,170,330,vp.x,vp.y);line(ctx,320,330,vp.x,vp.y);line(ctx,170,416,vp.x,vp.y);line(ctx,320,416,vp.x,vp.y);
+    ctx.strokeStyle='#d78742';rect(ctx,610,180,120,85);line(ctx,610,180,vp.x,vp.y);line(ctx,730,180,vp.x,vp.y);
+    // light
+    if(state.currentQuestStep>=4){ctx.fillStyle='rgba(255,209,102,.22)';ctx.beginPath();ctx.moveTo(610,180);ctx.lineTo(340,440);ctx.lineTo(500,445);ctx.lineTo(730,180);ctx.fill(); ctx.fillStyle='#7b4c00'; ctx.fillText('窗光方向 / shadows follow geometry',620,160);}
+    if(state.currentQuestStep>=3){ctx.fillStyle='rgba(84,199,216,.18)';ctx.fillRect(0,h*.55,w,h*.45);ctx.fillStyle='#28616a';ctx.fillText('前景 / 中景 / 远景分层',40,h-32);}
+    ctx.fillStyle='#24313b';ctx.font='bold 20px system-ui';ctx.fillText(questRoomSteps[state.currentQuestStep].title,30,38);ctx.font='14px system-ui';ctx.fillStyle='#65737d';ctx.fillText('输出：'+questRoomSteps[state.currentQuestStep].output,30,60);
+  }
+  function line(ctx,x1,y1,x2,y2){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+  function rect(ctx,x,y,w,h){ctx.strokeRect(x,y,w,h)}
+  function checkQuestStep(){
+    const s=questRoomSteps[state.currentQuestStep];
+    $('#feedback').innerHTML = `<b>检查：${s.title}</b><br>${s.task}<br><br>通关标准：你能说出这一步属于哪个岛、改变了哪种绘画判断，并保存一张“${s.output}”。`;
+    if(state.currentQuestStep<questRoomSteps.length-1){state.currentQuestStep++;setTimeout(render,900);} else toast('盒子房间任务完成！可以保存总卡片。');
+  }
 
-function drawFace(){
-  const c=$('faceCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
-  const yaw=+$('faceYaw').value/65, pitch=+$('facePitch').value/35, style=+$('animeStyle').value/100; const cx=w/2,cy=h/2+5;
-  const headW=130*(1-style*.12), headH=175*(1-style*.18); const faceShift=yaw*42;
-  ctx.save(); ctx.translate(cx,cy); ctx.strokeStyle='#24313a'; ctx.lineWidth=3; ctx.fillStyle='#fff1df'; ellipse(ctx,0,0,headW*(1-Math.abs(yaw)*.12),headH,0,true,true);
-  ctx.fillStyle='rgba(238,142,142,.13)'; ctx.beginPath(); ctx.ellipse(faceShift*.3,35,headW*.65,headH*.52,0,0,Math.PI); ctx.fill();
-  // guide lines on head surface
-  ctx.strokeStyle='rgba(74,143,214,.72)'; ctx.lineWidth=2; curveLine(ctx,faceShift,-headH*.85,faceShift*.6,headH*.78,yaw*30); // center
-  const lines=[[-48,'brow'],[-22,'eye'],[36,'nose'],[78,'mouth']];
-  lines.forEach(([yy])=>{ctx.beginPath();ctx.ellipse(faceShift*.18,yy+pitch*18,headW*.82*(1-Math.abs(yaw)*.25),9+Math.abs(yaw)*8,0,0,TAU);ctx.stroke();});
-  // eyes on curved surface
-  const eyeSize=lerp(15,34,style); const eyeY=-22+pitch*18; const sep=48*(1-Math.abs(yaw)*.28); const nearScale=1+yaw*.18, farScale=1-yaw*.18;
-  drawEye(ctx,faceShift*.22-sep,eyeY,eyeSize*farScale,style); drawEye(ctx,faceShift*.22+sep,eyeY,eyeSize*nearScale,style);
-  // nose wedge and mouth
-  ctx.strokeStyle='#c9895e'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(faceShift*.28, -5+pitch*16); ctx.lineTo(faceShift*.45+10*yaw, 38+pitch*18); ctx.lineTo(faceShift*.18-10*yaw, 41+pitch*18); ctx.stroke();
-  ctx.strokeStyle='#ee8e8e'; ctx.beginPath(); ctx.ellipse(faceShift*.22,78+pitch*15,30*(1-style*.35),5,0,0,Math.PI); ctx.stroke();
-  ctx.restore(); ctx.fillStyle='#4d5963'; ctx.fillText('头部坐标系：中线、眼线、鼻底、嘴线先转，五官再挂上去',22,34);
-}
-function ellipse(ctx,x,y,rx,ry,rot,fill,stroke){ctx.beginPath();ctx.ellipse(x,y,rx,ry,rot,0,TAU); if(fill)ctx.fill(); if(stroke)ctx.stroke();}
-function curveLine(ctx,x1,y1,x2,y2,b){ctx.beginPath();ctx.moveTo(x1,y1);ctx.bezierCurveTo(x1+b,y1+70,x2+b,y2-70,x2,y2);ctx.stroke();}
-function drawEye(ctx,x,y,s,style){ctx.save();ctx.translate(x,y);ctx.strokeStyle='#24313a';ctx.fillStyle='#fff';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(0,0,s*1.1,s*.55,0,0,TAU);ctx.fill();ctx.stroke();ctx.fillStyle='#24313a';ctx.beginPath();ctx.arc(0,1,s*.28,0,TAU);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-s*.08,-s*.08,s*.08+style*3,0,TAU);ctx.fill();ctx.restore();}
+  function setupLab(id){
+    const c=$('#labCanvas'), controls=$('#labControls'); if(!c||!controls)return; const ctx=c.getContext('2d');
+    const data={fov:55,depth:55,yaw:20,near:50,mid:50,far:50,light:40,rough:45,metal:15,gravity:55,stiff:45,wind:30,feeling:'安静'};
+    const controlHTML={
+      'lab-camera':`<div class="card"><h3>操作解释</h3><p>你正在调相机参数。观察近处边和远处边如何被投影压缩。</p></div>${slider('fov','FOV 视场角',20,100,55)}${slider('depth','Depth 深度',10,100,55)}${slider('yaw','Yaw 旋转',-45,45,20)}<button class="primary" data-save-lab>保存 FOV 对比卡</button>`,
+      'lab-depth':`<div class="card"><h3>操作解释</h3><p>你正在调空间层权重。深度不是阴影；它回答谁离你更近。</p></div>${slider('near','前景强度',0,100,70)}${slider('mid','中景强度',0,100,50)}${slider('far','远景强度',0,100,30)}<button class="primary" data-save-lab>保存深度层卡</button>`,
+      'lab-light':`<div class="card"><h3>操作解释</h3><p>你正在调光源方向。明暗交界线跟表面朝向有关。</p></div>${slider('light','光源方向',0,180,40)}<button class="primary" data-save-lab>保存明暗交界线卡</button>`,
+      'lab-material':`<div class="card"><h3>操作解释</h3><p>你正在调材质参数。粗糙度改变高光大小；金属度改变环境反射。</p></div>${slider('rough','Roughness 粗糙度',0,100,45)}${slider('metal','Metalness 金属度',0,100,15)}<button class="primary" data-save-lab>保存材质反应卡</button>`,
+      'lab-force':`<div class="card"><h3>操作解释</h3><p>你正在调力学参数。褶皱从固定点、重力、张力和材料硬度生成。</p></div>${slider('gravity','重力',0,100,55)}${slider('stiff','材料硬度',0,100,45)}${slider('wind','风向/风力',0,100,30)}<button class="primary" data-save-lab>保存褶皱力线卡</button>`,
+      'lab-style':`<div class="card"><h3>操作解释</h3><p>选择感受，系统把它翻译为线条、空间、颜色、明暗和构图。</p></div><div class="control"><label>感受</label><select id="feeling"><option>安静</option><option>紧张</option><option>孤独</option><option>温暖</option><option>梦幻</option><option>勇气</option></select></div><button class="primary" data-save-lab>保存风格参数卡</button>`
+    };
+    controls.innerHTML=controlHTML[id];
+    function read(){ $$('#labControls input').forEach(i=>data[i.id]=+i.value); const f=$('#feeling'); if(f)data.feeling=f.value; drawLab(ctx,c,id,data); }
+    $$('#labControls input,#labControls select').forEach(i=>i.oninput=read);
+    $('[data-save-lab]',controls).onclick=()=>saveMemory({title:labTitle(id),type:'实验输出卡',note:labInspector(id).drawing});
+    read();
+  }
+  function slider(id,label,min,max,val){return `<div class="control"><label for="${id}">${label}</label><input id="${id}" type="range" min="${min}" max="${max}" value="${val}"></div>`}
+  function drawLab(ctx,c,id,d){const w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff8eb';ctx.fillRect(0,0,w,h);ctx.font='bold 20px system-ui';ctx.fillStyle='#24313b';ctx.fillText(labTitle(id),28,38);ctx.font='14px system-ui';
+    if(id==='lab-camera'){const f=d.fov/100;const z=d.depth/100;const cx=w/2,cy=h/2;const scale=1+f*1.8;const front=120*scale,back=120*(1-f*.55)*z+40;ctx.strokeStyle='#d6c3aa';ctx.setLineDash([5,6]);line(ctx,cx-front,cy+140,cx,cy);line(ctx,cx+front,cy+140,cx,cy);ctx.setLineDash([]);ctx.strokeStyle='#22314a';ctx.lineWidth=3;ctx.strokeRect(cx-front/2,cy+60,front,front*.55);ctx.strokeRect(cx-back/2+d.yaw*1.5,cy-70,back,back*.55);line(ctx,cx-front/2,cy+60,cx-back/2+d.yaw*1.5,cy-70);line(ctx,cx+front/2,cy+60,cx+back/2+d.yaw*1.5,cy-70);ctx.fillText(`FOV=${d.fov}：越大越夸张；Depth=${d.depth}：深度越强前后差越大`,28,h-28);}
+    if(id==='lab-depth'){const layers=[['前景',d.near,'#ffd166'],['中景',d.mid,'#54c7d8'],['远景',d.far,'#8e7cf4']];layers.forEach((l,i)=>{ctx.globalAlpha=.25+l[1]/150;ctx.fillStyle=l[2];ctx.fillRect(80+i*210,120+i*42,180,240-i*38);ctx.globalAlpha=1;ctx.fillStyle='#24313b';ctx.fillText(l[0],110+i*210,105+i*42);});ctx.fillText('练习：先分空间层，再画阴影。不要把黑当远。',28,h-28);}
+    if(id==='lab-light'){const cx=w/2,cy=h/2,r=145;const a=d.light*Math.PI/180;ctx.fillStyle='#f5d5a8';ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();const lx=cx+Math.cos(a)*230,ly=cy-Math.sin(a)*180;ctx.strokeStyle='#ffd166';ctx.lineWidth=4;line(ctx,lx,ly,cx,cy);ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(lx,ly,14,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#111827';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(cx,cy,r*.74,r*.97,Math.PI/2-a,Math.PI*.15,Math.PI*1.15);ctx.stroke();ctx.fillStyle='rgba(30,40,60,.28)';ctx.beginPath();ctx.arc(cx+r*.25*Math.cos(a+Math.PI),cy-r*.18*Math.sin(a+Math.PI),r*.78,0,Math.PI*2);ctx.fill();ctx.fillStyle='#24313b';ctx.fillText('黑线 = 明暗交界线示意。它跟体块转向和光源有关。',28,h-28);}
+    if(id==='lab-material'){const cx=w/2,cy=h/2,r=140;ctx.fillStyle=d.metal>50?'#b7c2d2':'#eab092';ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();const size=18+d.rough*1.1;ctx.fillStyle=`rgba(255,255,255,${.92-d.rough/160})`;ctx.beginPath();ctx.ellipse(cx-r*.35,cy-r*.42,size,size*.55,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle=d.metal>50?'rgba(70,90,140,.8)':'rgba(140,90,60,.45)';for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(cx,cy,r-18-i*16,Math.PI*.1,Math.PI*.9);ctx.stroke();}ctx.fillStyle='#24313b';ctx.fillText(`粗糙度 ${d.rough}：高光越大越散；金属度 ${d.metal}：环境反射更强。`,28,h-28);}
+    if(id==='lab-force'){const topY=100;const left=260,right=600;ctx.fillStyle='#24313b';ctx.fillRect(left-5,topY-5,10,10);ctx.fillRect(right-5,topY-5,10,10);ctx.strokeStyle='#22314a';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(left,topY);for(let i=0;i<=12;i++){const t=i/12;const x=left+(right-left)*t;const sag=(d.gravity*1.8)*(Math.sin(Math.PI*t));const wave=(100-d.stiff)/6*Math.sin(t*Math.PI*6+d.wind/15);ctx.lineTo(x,topY+sag+wave);}ctx.lineTo(right,topY);ctx.stroke();ctx.strokeStyle='#d78742';ctx.lineWidth=2;for(let i=1;i<9;i++){const t=i/9;const x=left+(right-left)*t;line(ctx,x,topY+12,x+(d.wind-50)*.7,topY+130+d.gravity*.8*Math.sin(Math.PI*t));}ctx.fillStyle='#24313b';ctx.fillText('固定点 → 张力线 → 重力下垂 → 材料硬度决定褶皱锐钝。',28,h-28);}
+    if(id==='lab-style'){const params={安静:['长线','低饱和','大留白','柔光'],紧张:['尖线','高对比','倾斜构图','硬阴影'],孤独:['小人物','冷色','大空间','远景'],温暖:['圆线','暖色','包围感','柔边缘'],梦幻:['漂浮','渐变','边缘光','弱透视'],勇气:['上升线','金色','强中心','高亮']};const arr=params[d.feeling]||params.安静;ctx.fillStyle='#24313b';ctx.font='bold 48px system-ui';ctx.fillText(d.feeling,80,150);ctx.font='bold 28px system-ui';arr.forEach((p,i)=>{ctx.fillStyle=['#54c7d8','#ffd166','#8e7cf4','#f39ab5'][i];ctx.fillRect(100+i*170,230,130,90);ctx.fillStyle='#111827';ctx.fillText(p,118+i*170,285);});ctx.font='14px system-ui';ctx.fillStyle='#24313b';ctx.fillText('感受不是直接画出来，而是翻译成线条、颜色、空间、明暗。',28,h-28);}
+  }
 
-function drawMaterial(){
-  const c=$('materialCanvas'), ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
-  const alb=hexToRgb($('albedo').value), light=hexToRgb($('lightColor').value), env=hexToRgb($('envColor').value), toon=+$('toonLevel').value/100;
-  const cx=165, cy=210, r=110;
-  for(let y=0;y<h;y++){for(let x=0;x<w;x++){const dx=(x-cx)/r, dy=(y-cy)/r, rr=dx*dx+dy*dy; if(rr>1)continue; const z=Math.sqrt(1-rr); const ndl=clamp((-dx*.35 + -dy*.55 + z*.72),0,1); let band=toon>0.55?(ndl>.62?1:ndl>.24?.55:.22):ndl; const spec=Math.pow(Math.max(0,(-dx*.4+-dy*.5+z*.7)),45)*(1-toon*.4); ctx.fillStyle=rgbStr(alb[0]*(.2+band*.8)*light[0]/255+env[0]*(1-band)*.26+spec*255,alb[1]*(.2+band*.8)*light[1]/255+env[1]*(1-band)*.26+spec*245,alb[2]*(.2+band*.8)*light[2]/255+env[2]*(1-band)*.26+spec*220); ctx.fillRect(x,y,1,1);}}
-  ctx.strokeStyle='#24313a'; ctx.lineWidth=2; ctx.beginPath();ctx.arc(cx,cy,r,0,TAU);ctx.stroke();
-  const swatches=[['固有色',alb],['光源色',light],['环境色',env],['亮部',mix(alb,light,.5)],['暗部',mix(alb,env,.45)]];
-  swatches.forEach((s,i)=>{const y=80+i*52;ctx.fillStyle=rgbStr(...s[1]);ctx.fillRect(330,y,54,34);ctx.strokeStyle='#24313a';ctx.strokeRect(330,y,54,34);ctx.fillStyle='#24313a';ctx.fillText(s[0],395,y+23);});
-  ctx.fillText('颜色 = 固有色 × 光照 + 环境 + 高光 + 风格压缩',28,34);
-}
-function mix(a,b,t){return [lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)]}
+  let studioCtx, studioLast, studioOverlays={perspective:false,depth:false,head:false,light:false};
+  function setupStudio(){const c=$('#studioCanvas'); if(!c)return; studioCtx=c.getContext('2d'); studioCtx.fillStyle='#fffaf2';studioCtx.fillRect(0,0,c.width,c.height); drawStudioOverlays(); $$('.studio-tools [data-tool]').forEach(b=>b.onclick=()=>{$$('.studio-tools [data-tool]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.studioTool=b.dataset.tool;});$$('[data-overlay]').forEach(b=>b.onclick=()=>{const k=b.dataset.overlay;studioOverlays[k]=!studioOverlays[k];b.classList.toggle('active',studioOverlays[k]); redrawStudioBase();});$('[data-action="clear-studio"]')?.addEventListener('click',()=>{studioCtx.clearRect(0,0,c.width,c.height);studioCtx.fillStyle='#fffaf2';studioCtx.fillRect(0,0,c.width,c.height);drawStudioOverlays();});$('[data-action="export-studio"]')?.addEventListener('click',()=>{const a=document.createElement('a');a.download='drawescape-studio.png';a.href=c.toDataURL('image/png');a.click();});c.onpointerdown=e=>{state.studioDrawing=true;studioLast=pos(e,c);};c.onpointermove=e=>{if(!state.studioDrawing)return;const p=pos(e,c);studioCtx.strokeStyle=state.studioTool==='eraser'?'#fffaf2':'#24313b';studioCtx.lineWidth=state.studioTool==='eraser'?18:3;studioCtx.lineCap='round';line(studioCtx,studioLast.x,studioLast.y,p.x,p.y);studioLast=p;};window.onpointerup=()=>state.studioDrawing=false;}
+  function redrawStudioBase(){const c=$('#studioCanvas');studioCtx.fillStyle='rgba(255,250,242,.92)';studioCtx.fillRect(0,0,c.width,c.height);drawStudioOverlays();}
+  function drawStudioOverlays(){const c=$('#studioCanvas'); if(!c||!studioCtx)return; const ctx=studioCtx,w=c.width,h=c.height;if(studioOverlays.perspective){ctx.strokeStyle='rgba(84,199,216,.55)';ctx.setLineDash([6,8]);const vp={x:w*.5,y:h*.38};for(let x=0;x<w;x+=80)line(ctx,x,h,vp.x,vp.y);ctx.setLineDash([]);} if(studioOverlays.depth){ctx.fillStyle='rgba(255,209,102,.13)';ctx.fillRect(0,h*.62,w,h*.38);ctx.fillStyle='rgba(84,199,216,.13)';ctx.fillRect(0,h*.35,w,h*.27);ctx.fillStyle='rgba(142,124,244,.13)';ctx.fillRect(0,0,w,h*.35);} if(studioOverlays.head){ctx.strokeStyle='rgba(238,140,117,.7)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(w*.5,h*.46,90,120,0,0,Math.PI*2);ctx.stroke();line(ctx,w*.5,h*.28,w*.5,h*.66);line(ctx,w*.39,h*.44,w*.61,h*.44);line(ctx,w*.42,h*.54,w*.58,h*.54);} if(studioOverlays.light){ctx.strokeStyle='rgba(255,180,40,.9)';ctx.lineWidth=4;line(ctx,w*.15,h*.15,w*.45,h*.42);ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(w*.15,h*.15,18,0,Math.PI*2);ctx.fill();}}
+  function pos(e,c){const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}}
 
-function drawStyle(){
-  const c=$('styleCanvas'), ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); const e=emotions[activeEmotion]; const base=hexToRgb(e.color); ctx.fillStyle=rgbStr(base[0]+40,base[1]+40,base[2]+40); ctx.fillRect(0,0,w,h); ctx.globalAlpha=.26; ctx.strokeStyle='#fff'; for(let i=0;i<15;i++){ctx.lineWidth=activeEmotion==='tension'?2+i%3:1; ctx.beginPath(); const y=30+i*28; if(activeEmotion==='calm'||activeEmotion==='warm'){ctx.moveTo(40,y);ctx.bezierCurveTo(160,y+10,280,y-10,480,y+5);} else if(activeEmotion==='lonely'){ctx.moveTo(60,y);ctx.lineTo(120,y+Math.sin(i)*8);} else if(activeEmotion==='dream'){ctx.moveTo(40,y);ctx.bezierCurveTo(120,y-40,250,y+50,470,y-10);} else {ctx.moveTo(40,y);ctx.lineTo(180,y-40);ctx.lineTo(250,y+20);ctx.lineTo(480,y-25);} ctx.stroke();}
-  ctx.globalAlpha=1; ctx.fillStyle='rgba(255,255,255,.82)'; ctx.fillRect(40,265,440,105); ctx.fillStyle='#24313a'; ctx.font='18px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`${e.name}：视觉参数卡`,60,296); ctx.font='14px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`线条：${e.line}`,60,322); ctx.fillText(`空间：${e.space}`,60,344); ctx.fillText(`明暗：${e.light}`,60,366);
-  $('styleOutput').innerHTML=`<strong>${e.name}</strong> → 线条：${e.line}｜色彩：${e.color}｜空间：${e.space}｜明暗：${e.light}`;
-}
+  function openMap(){renderMap();$('#mapOverlay').hidden=false;}
+  function closeMap(){$('#mapOverlay').hidden=true;}
+  function renderMap(){
+    const tab=state.mapTab;
+    let items=[];
+    if(tab==='world') items=[['hub','Hub','游戏入口'],['pipeline','世界管线','现实到绘画'],['islands','知识岛屿','十个主问题'],['quests','跨岛任务','综合应用'],['labs','实验室','变量探索'],['glossary','术语星典','名词互译'],['studio','绘画台','输出练习'],['memory','压缩数据库','积累经验']];
+    if(tab==='pipeline') items=pipeline.map(p=>[p.id,p.title,p.short,'pipeline']);
+    if(tab==='islands') items=islands.map(i=>[`island-${i.id}`,i.title,i.core]);
+    if(tab==='quests') items=quests.map(q=>[q.id,q.title,q.output]);
+    $('#worldMap').innerHTML=items.map(it=>`<div class="map-node ${it[0]===state.route?'active':''}" data-map-route="${it[0]}" data-map-kind="${it[3]||''}"><b>${it[1]}</b><small>${it[2]}</small></div>`).join('');
+    $$('[data-map-route]').forEach(n=>n.onclick=()=>{const r=n.dataset.mapRoute;if(n.dataset.mapKind==='pipeline'){state.mapTab='pipeline';inspectPipe(r);setRoute('pipeline');}else setRoute(r);closeMap();});
+  }
+  function renderMemoryIfNeeded(){ if(state.route==='memory') $('#memoryList').innerHTML=memoryListHTML(); }
 
-const drawState={drawing:false,last:null,strokes:[]};
-function initDrawing(){
-  const c=$('drawCanvas'), ctx=c.getContext('2d'); drawGuides();
-  function pos(ev){const r=c.getBoundingClientRect(); const e=ev.touches?ev.touches[0]:ev; return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height};}
-  function down(ev){ev.preventDefault();drawState.drawing=true;drawState.last=pos(ev);}
-  function move(ev){if(!drawState.drawing)return;ev.preventDefault();const p=pos(ev); ctx.strokeStyle=$('penColor').value; ctx.lineWidth=+$('penSize').value; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.beginPath();ctx.moveTo(drawState.last.x,drawState.last.y);ctx.lineTo(p.x,p.y);ctx.stroke(); drawState.last=p;}
-  function up(){drawState.drawing=false;}
-  c.addEventListener('pointerdown',down); c.addEventListener('pointermove',move); window.addEventListener('pointerup',up);
-  ['guidePerspective','guideDepth','guideFace','guideLight'].forEach(id=>$(id).addEventListener('change',drawGuides));
-  $('clearDraw').addEventListener('click',()=>{ctx.clearRect(0,0,c.width,c.height);drawGuides();});
-  $('exportDraw').addEventListener('click',()=>{const a=document.createElement('a');a.download='drawescape-studio.png';a.href=c.toDataURL('image/png');a.click();});
-}
-function drawGuides(){
-  const c=$('drawCanvas'), ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#fffef9'; ctx.fillRect(0,0,c.width,c.height);
-  ctx.strokeStyle='rgba(36,49,58,.06)'; ctx.lineWidth=1; for(let x=0;x<c.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();} for(let y=0;y<c.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();}
-  if($('guidePerspective').checked){const vp1={x:120,y:285},vp2={x:1080,y:285}; ctx.strokeStyle='rgba(74,143,214,.28)'; ctx.lineWidth=1.5; for(let y=120;y<690;y+=70){ctx.beginPath();ctx.moveTo(vp1.x,vp1.y);ctx.lineTo(600,y);ctx.stroke();ctx.beginPath();ctx.moveTo(vp2.x,vp2.y);ctx.lineTo(600,y);ctx.stroke();} ctx.strokeStyle='rgba(238,142,142,.4)';ctx.beginPath();ctx.moveTo(0,285);ctx.lineTo(c.width,285);ctx.stroke();}
-  if($('guideDepth').checked){ctx.fillStyle='rgba(143,123,232,.08)';ctx.fillRect(0,0,c.width,250);ctx.fillStyle='rgba(84,198,211,.08)';ctx.fillRect(0,250,c.width,250);ctx.fillStyle='rgba(245,185,79,.08)';ctx.fillRect(0,500,c.width,260);}
-  if($('guideFace').checked){ctx.strokeStyle='rgba(119,169,135,.45)';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(600,370,135,185,0,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(600,190);ctx.bezierCurveTo(630,300,630,440,600,555);ctx.stroke();[305,360,435,485].forEach(y=>{ctx.beginPath();ctx.ellipse(600,y,120,10,0,0,TAU);ctx.stroke();});}
-  if($('guideLight').checked){ctx.strokeStyle='rgba(245,185,79,.9)';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(140,110);ctx.lineTo(250,190);ctx.stroke();ctx.fillStyle='rgba(245,185,79,.9)';ctx.beginPath();ctx.arc(135,106,16,0,TAU);ctx.fill();}
-}
-
-function bindLabControls(){
-  ['projYaw','projPitch','projFov','projDepth'].forEach(id=>$(id).addEventListener('input',drawProjection));
-  ['shadeMode','lightX','lightY','roughness','materialType'].forEach(id=>$(id).addEventListener('input',drawShading));
-  ['clothStiff','windForce'].forEach(id=>$(id).addEventListener('input',drawFold));
-  ['faceYaw','facePitch','animeStyle'].forEach(id=>$(id).addEventListener('input',drawFace));
-  ['albedo','lightColor','envColor','toonLevel'].forEach(id=>$(id).addEventListener('input',drawMaterial));
-}
-
-function boot(){initUI();renderStatic();drawCover();bindLabControls();drawProjection();drawShading();drawFold();drawFace();drawMaterial();drawStyle();initDrawing();}
-window.addEventListener('DOMContentLoaded',boot);
+  $('#openMapBtn').onclick=openMap; $('#openLocalMapBtn').onclick=openMap; $('#closeMapBtn').onclick=closeMap;
+  $('#saveCardBtn').onclick=()=>saveMemory({title:getCrumbs().split('/').pop().trim(),type:'当前位置知识卡',note:$('#feedback').innerText.slice(0,220)});
+  $('#focusBtn').onclick=()=>document.body.classList.toggle('low-load');
+  $('#prevBtn').onclick=()=>{ if(state.route==='quest-room'&&state.currentQuestStep>0){state.currentQuestStep--;render();} else history.back(); };
+  $('#nextBtn').onclick=()=>{ if(state.route==='quest-room'&&state.currentQuestStep<questRoomSteps.length-1){state.currentQuestStep++;render();} else openMap(); };
+  $$('.topnav button,.brand').forEach(b=>b.onclick=()=>setRoute(b.dataset.route));
+  $$('.map-tab').forEach(b=>b.onclick=()=>{$$('.map-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.mapTab=b.dataset.map;renderMap();});
+  document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='m'){$('#mapOverlay').hidden?openMap():closeMap();} if(e.key==='Escape')closeMap();});
+  document.body.addEventListener('click',e=>{const b=e.target.closest('[data-route]'); if(b)setRoute(b.dataset.route);});
+  render();
+})();

@@ -1,217 +1,105 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Drawescape V8｜Knowledge Blueprint</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drawescape V10｜Navigation Quest Edition</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <a class="skip" href="#world">跳到知识地图</a>
-  <header class="hero" id="top">
-    <div class="hero-grid">
-      <section class="hero-copy">
-        <div class="eyebrow">Starcove Drawing Lab · Knowledge Blueprint Edition</div>
-        <h1>Drawescape<br><span>把世界拆成结构，再折叠成画。</span></h1>
-        <p class="hero-lead">一个学习绘画、空间透视、计算机视觉与建模知识的可视化探索平台。这里不只教“怎么画”，而是解释世界为什么会这样被看见、被投影、被照亮、被压缩、被风格化。</p>
-        <div class="hero-actions">
-          <button class="btn primary" data-jump="pipeline">进入知识管线</button>
-          <button class="btn" data-jump="labs">打开实验室</button>
-          <button class="btn ghost" data-jump="glossary">CV 术语星典</button>
-        </div>
-        <div class="hero-motto">Reality → Geometry → Projection → Light → Material → Force → Feeling → Drawing</div>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button class="brand" data-route="hub" aria-label="回到首页">
+        <span class="brand-mark">✦</span>
+        <span><b>Drawescape</b><small>世界折叠导航台</small></span>
+      </button>
+      <nav class="topnav" aria-label="主导航">
+        <button data-route="hub">Hub</button>
+        <button data-route="pipeline">世界管线</button>
+        <button data-route="islands">知识岛屿</button>
+        <button data-route="quests">跨岛任务</button>
+        <button data-route="labs">实验室</button>
+        <button data-route="glossary">术语星典</button>
+        <button data-route="studio">绘画台</button>
+        <button data-route="memory">压缩数据库</button>
+      </nav>
+      <div class="top-actions">
+        <button id="openMapBtn" class="primary">🗺️ 快速地图</button>
+        <button id="focusBtn" title="低负荷显示">◐</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="left-panel" aria-label="当前位置导航">
+        <section class="panel-card compact">
+          <div class="panel-title">当前位置</div>
+          <div id="breadcrumb" class="breadcrumb">Drawescape / Hub</div>
+          <button id="openLocalMapBtn" class="wide ghost">打开本区总平面</button>
+        </section>
+        <section class="panel-card grow">
+          <div class="panel-title">本区导航</div>
+          <div id="localNav" class="local-nav"></div>
+        </section>
+        <section class="panel-card compact">
+          <div class="panel-title">快捷动作</div>
+          <div class="quick-grid">
+            <button data-route="quest-room">继续：盒子房间</button>
+            <button data-route="lab-camera">FOV 实验</button>
+            <button data-route="studio">打开绘画台</button>
+            <button data-route="memory">保存库</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="main-stage" aria-label="主要内容">
+        <div id="routeView"></div>
       </section>
-      <section class="cover-card" aria-label="Drawescape cover">
-        <canvas id="coverCanvas" width="720" height="520"></canvas>
-        <div class="hud hud-a">SCAN LAYERS</div>
-        <div class="hud hud-b">WORLD FOLDING ENGINE</div>
-        <div class="hud hud-c">DEPTH · NORMAL · LIGHT · STYLE</div>
-      </section>
+
+      <aside class="right-panel" aria-label="知识检查器">
+        <section class="panel-card inspector-card">
+          <div class="panel-title">知识检查器</div>
+          <div id="inspector" class="inspector"></div>
+        </section>
+        <section class="panel-card compact">
+          <div class="panel-title">即时反馈</div>
+          <div id="feedback" class="feedback-box">选择一个位置或完成一个小任务后，这里会显示反馈。</div>
+        </section>
+        <section class="panel-card compact">
+          <div class="panel-title">输出卡片</div>
+          <button id="saveCardBtn" class="wide primary">保存当前位置理解</button>
+          <small class="hint">每一关都应产生一张可回看的知识卡。</small>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="bottombar">
+      <div id="questStatus">目标：打开地图，选择一个岛屿或任务。</div>
+      <div class="bottombar-actions">
+        <button id="prevBtn">← 上一步</button>
+        <button id="nextBtn">下一步 →</button>
+      </div>
+    </footer>
+  </div>
+
+  <div id="mapOverlay" class="overlay" hidden>
+    <div class="overlay-card worldmap-card">
+      <div class="overlay-head">
+        <div>
+          <h2>🗺️ Drawescape 总平面图</h2>
+          <p>像游戏地图一样快速切换位置。每个节点都对应一个可深化区域。</p>
+        </div>
+        <button id="closeMapBtn" class="close">×</button>
+      </div>
+      <div class="map-tabs">
+        <button class="map-tab active" data-map="world">世界</button>
+        <button class="map-tab" data-map="pipeline">管线</button>
+        <button class="map-tab" data-map="islands">岛屿</button>
+        <button class="map-tab" data-map="quests">任务</button>
+      </div>
+      <div id="worldMap" class="world-map"></div>
+      <div class="map-note">快捷键：按 <b>M</b> 打开/关闭地图。按 <b>Esc</b> 关闭。</div>
     </div>
-  </header>
-
-  <nav class="rail" aria-label="主导航">
-    <button data-jump="pipeline">管线</button>
-    <button data-jump="world">地图</button>
-    <button data-jump="missions">任务</button>
-    <button data-jump="labs">实验</button>
-    <button data-jump="glossary">术语</button>
-    <button data-jump="studio">画台</button>
-  </nav>
-
-  <main>
-    <section class="section intro" id="pipeline">
-      <div class="section-head">
-        <div>
-          <h2>绘画信息整合管线</h2>
-          <p>每个知识点都必须从“现实是什么”一路转译到“画面怎么做”。</p>
-        </div>
-        <button class="btn small" id="toggleCalm">柔和阅读</button>
-      </div>
-      <div class="pipeline" id="pipelineCards"></div>
-      <article class="principle-card wide">
-        <h3>开发铁规则</h3>
-        <p><strong>任何互动都要同时回答四个问题：</strong>现实中它是什么？计算机如何表示它？绘画中如何压缩它？用户如何练习并校准它？</p>
-        <p>例如“明暗交界线”：现实里是体块转向；计算机里是表面法线与光线方向的关系；绘画里是核心暗部、半调子、反光的组织边界；练习里是拖光源、标法线、画暗部、再校准。</p>
-      </article>
-    </section>
-
-    <section class="section" id="world">
-      <div class="section-head">
-        <div>
-          <h2>Drawescape 世界地图</h2>
-          <p>十个岛屿不是目录，而是学习路径。点开岛屿会看到知识转译矩阵。</p>
-        </div>
-        <div class="toolbar">
-          <button class="btn small" id="expandAll">展开全部</button>
-          <button class="btn small" id="collapseAll">收起</button>
-        </div>
-      </div>
-      <div class="island-map" id="islandMap"></div>
-      <div class="knowledge-panel" id="knowledgePanel"></div>
-    </section>
-
-    <section class="section" id="missions">
-      <div class="section-head">
-        <div>
-          <h2>跨岛任务：把知识串成绘画动作</h2>
-          <p>不是孤立学模块，而是用同一套管线完成“人脸、褶皱、场景、动漫化、情绪表达”。</p>
-        </div>
-      </div>
-      <div class="mission-grid" id="missionGrid"></div>
-    </section>
-
-    <section class="section lab-section" id="labs">
-      <div class="section-head">
-        <div>
-          <h2>可视化实验室</h2>
-          <p>V8 先回到“原理深入 + 稳定互动”。所有实验都用本地 Canvas，不依赖外部库。</p>
-        </div>
-        <span class="status-pill">Stable Canvas Engine</span>
-      </div>
-
-      <div class="lab-grid">
-        <article class="lab-card span2" id="projectionLab">
-          <div class="lab-title">
-            <div><h3>相机塔：投影几何实验</h3><p>针孔相机、FOV、消失点、3D 点如何折叠到 2D。</p></div>
-            <button class="btn small" data-read="projection">讲解</button>
-          </div>
-          <canvas id="projectionCanvas" width="920" height="520"></canvas>
-          <div class="controls grid4">
-            <label>Yaw <input type="range" id="projYaw" min="-70" max="70" value="25"></label>
-            <label>Pitch <input type="range" id="projPitch" min="-35" max="35" value="-8"></label>
-            <label>FOV <input type="range" id="projFov" min="25" max="100" value="55"></label>
-            <label>Depth <input type="range" id="projDepth" min="3" max="10" value="6"></label>
-          </div>
-          <p class="lab-note">绘画翻译：透视不是格子规则，而是相机把三维坐标压成平面坐标。FOV 越大，近大远小越强。</p>
-        </article>
-
-        <article class="lab-card span2" id="lightLab">
-          <div class="lab-title">
-            <div><h3>光之月台：深度 / 法线 / 明暗交界线</h3><p>把“调子”拆成深度、法线、漫反射、高光、AO。</p></div>
-            <button class="btn small" data-read="light">讲解</button>
-          </div>
-          <canvas id="shadingCanvas" width="920" height="520"></canvas>
-          <div class="controls grid5">
-            <label>模式 <select id="shadeMode"><option value="beauty">整合图</option><option value="depth">深度图</option><option value="normal">法线图</option><option value="diffuse">漫反射</option><option value="terminator">交界线</option></select></label>
-            <label>光源X <input type="range" id="lightX" min="-100" max="100" value="-40"></label>
-            <label>光源Y <input type="range" id="lightY" min="-100" max="100" value="-50"></label>
-            <label>粗糙度 <input type="range" id="roughness" min="5" max="90" value="35"></label>
-            <label>材质 <select id="materialType"><option value="plaster">石膏</option><option value="skin">皮肤</option><option value="metal">金属</option><option value="cloth">布料</option></select></label>
-          </div>
-          <p class="lab-note">绘画翻译：明暗交界线是体块转向的证据；不是把某一圈涂黑，而是先理解表面朝向如何背离主光。</p>
-        </article>
-
-        <article class="lab-card" id="foldLab">
-          <div class="lab-title"><div><h3>褶皱山谷：力线推理</h3><p>固定点、张力、重力、材质硬度。</p></div><button class="btn small" data-read="fold">讲解</button></div>
-          <canvas id="foldCanvas" width="520" height="420"></canvas>
-          <div class="controls grid2">
-            <label>材料硬度 <input type="range" id="clothStiff" min="0" max="100" value="35"></label>
-            <label>风向 <input type="range" id="windForce" min="-80" max="80" value="20"></label>
-          </div>
-          <p class="lab-note">画褶皱先问：哪里固定？哪里被拉？材料软硬如何？</p>
-        </article>
-
-        <article class="lab-card" id="faceLab">
-          <div class="lab-title"><div><h3>人形剧场：头部坐标系</h3><p>不是五官贴图，而是锚点挂在头部体积上。</p></div><button class="btn small" data-read="face">讲解</button></div>
-          <canvas id="faceCanvas" width="520" height="420"></canvas>
-          <div class="controls grid3">
-            <label>转头 <input type="range" id="faceYaw" min="-65" max="65" value="25"></label>
-            <label>俯仰 <input type="range" id="facePitch" min="-35" max="35" value="0"></label>
-            <label>风格 <input type="range" id="animeStyle" min="0" max="100" value="35"></label>
-          </div>
-          <p class="lab-note">动漫化可以放大眼睛、简化鼻口，但中心线、眼线、鼻底和嘴线必须仍在同一个坐标系里。</p>
-        </article>
-
-        <article class="lab-card" id="materialLab">
-          <div class="lab-title"><div><h3>材质星市：颜色不是色盘</h3><p>最终颜色是光、材质、空间与风格的结果。</p></div><button class="btn small" data-read="material">讲解</button></div>
-          <canvas id="materialCanvas" width="520" height="420"></canvas>
-          <div class="controls grid2">
-            <label>固有色 <input type="color" id="albedo" value="#f2a899"></label>
-            <label>光色 <input type="color" id="lightColor" value="#ffd59a"></label>
-            <label>环境色 <input type="color" id="envColor" value="#8db5d9"></label>
-            <label>漫画压缩 <input type="range" id="toonLevel" min="0" max="100" value="45"></label>
-          </div>
-          <p class="lab-note">皮肤不是“肉色”，而是固有色、暖光、冷环境、局部高光和色彩压缩共同生成。</p>
-        </article>
-
-        <article class="lab-card" id="styleLab">
-          <div class="lab-title"><div><h3>风格云城：感受翻译器</h3><p>把感受转成线条、颜色、空间、明暗、构图。</p></div><button class="btn small" data-read="style">讲解</button></div>
-          <div class="emotion-tabs" id="emotionTabs"></div>
-          <canvas id="styleCanvas" width="520" height="420"></canvas>
-          <div class="style-output" id="styleOutput"></div>
-        </article>
-      </div>
-    </section>
-
-    <section class="section" id="glossary">
-      <div class="section-head">
-        <div>
-          <h2>CV / CG / 建模术语星典</h2>
-          <p>复杂词汇不是门槛，而是看懂绘画的工具。每个词都给出“通俗解释、绘画用途、操作练习”。</p>
-        </div>
-        <input id="glossarySearch" class="search" placeholder="搜索：法线 / BRDF / 三角测量 / FOV ..." />
-      </div>
-      <div class="glossary-grid" id="glossaryGrid"></div>
-    </section>
-
-    <section class="section" id="studio">
-      <div class="section-head">
-        <div>
-          <h2>信息整合绘画台</h2>
-          <p>画布不是单独存在，而是把参考、透视、深度、光源、锚点、风格卡叠在一起。</p>
-        </div>
-        <div class="toolbar">
-          <button class="btn small" id="clearDraw">清空</button>
-          <button class="btn small" id="exportDraw">导出 PNG</button>
-        </div>
-      </div>
-      <div class="studio-wrap">
-        <div class="studio-tools">
-          <label>笔色 <input type="color" id="penColor" value="#25313a"></label>
-          <label>线宽 <input type="range" id="penSize" min="1" max="18" value="4"></label>
-          <label><input type="checkbox" id="guidePerspective" checked> 透视辅助</label>
-          <label><input type="checkbox" id="guideDepth"> 深度三层</label>
-          <label><input type="checkbox" id="guideFace"> 头部辅助</label>
-          <label><input type="checkbox" id="guideLight"> 光源箭头</label>
-        </div>
-        <canvas id="drawCanvas" width="1200" height="760"></canvas>
-      </div>
-    </section>
-  </main>
-
-  <aside class="drawer" id="drawer" aria-hidden="true">
-    <div class="drawer-head">
-      <h3 id="drawerTitle">知识讲解</h3>
-      <button class="btn small" id="closeDrawer">关闭</button>
-    </div>
-    <div class="drawer-body" id="drawerBody"></div>
-  </aside>
-  <div class="drawer-back" id="drawerBack"></div>
-
-  <footer class="footer">
-    <p>Drawescape V8 · Knowledge Blueprint Edition · 目标：让数理化、计算机建模和绘画变成一场有趣的世界观察游戏。</p>
-  </footer>
+  </div>
 
   <script src="app.js"></script>
 </body>
