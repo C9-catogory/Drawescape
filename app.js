@@ -1,145 +1,286 @@
-/* Drawescape V6 - stable interactive prototype
-   No build step. Canvas fallback first; optional Three.js WebGL loaded on demand.
-*/
-const $ = (id)=>document.getElementById(id);
-const TAU = Math.PI*2;
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const lerp=(a,b,t)=>a+(b-a)*t;
-const rand=(a,b)=>a+Math.random()*(b-a);
-function go(id){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});} window.go=go;
-function toast(msg){const t=$('toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2200);} window.toast=toast;
-function toggleFocus(){document.body.classList.toggle('focus'); toast(document.body.classList.contains('focus')?'聚焦模式开启':'聚焦模式关闭');} window.toggleFocus=toggleFocus;
-function resetProgress(){localStorage.removeItem('drawescape_views_v6');localStorage.removeItem('drawescape_perspective_v6');toast('本地进度已重置');refreshSavedViews();} window.resetProgress=resetProgress;
-function hexToRgb(hex){const h=hex.replace('#','');return {r:parseInt(h.slice(0,2),16),g:parseInt(h.slice(2,4),16),b:parseInt(h.slice(4,6),16)}}
-function rgbToHex(r,g,b){return '#'+[r,g,b].map(v=>clamp(Math.round(v),0,255).toString(16).padStart(2,'0')).join('')}
-function mix(c1,c2,t){return {r:lerp(c1.r,c2.r,t),g:lerp(c1.g,c2.g,t),b:lerp(c1.b,c2.b,t)}}
-function canvasPoint(canvas,e){const r=canvas.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return {x:(p.clientX-r.left)*canvas.width/r.width,y:(p.clientY-r.top)*canvas.height/r.height};}
-function downloadBlob(name,content,type='application/json'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-function exportCanvas(id,name){const c=$(id); const a=document.createElement('a'); a.href=c.toDataURL('image/png'); a.download=name; a.click();} window.exportCanvas=exportCanvas;
+'use strict';
 
-// ---------------- cover animation ----------------
-function cover(){const c=$('coverCanvas'),ctx=c.getContext('2d');let t=0;function frame(){t+=0.012;const w=c.width,h=c.height;ctx.clearRect(0,0,w,h);let g=ctx.createLinearGradient(0,0,w,h);g.addColorStop(0,'#172438');g.addColorStop(.5,'#3f6ea4');g.addColorStop(1,'#ffe0a0');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);ctx.globalAlpha=.75;ctx.strokeStyle='rgba(255,255,255,.16)';ctx.lineWidth=1;for(let x=-80;x<w+80;x+=48){ctx.beginPath();ctx.moveTo(x+Math.sin(t+x*.01)*18,0);ctx.lineTo(x+140+Math.sin(t+x*.008)*25,h);ctx.stroke();}for(let y=20;y<h;y+=42){ctx.beginPath();ctx.moveTo(0,y+Math.sin(t+y*.02)*8);ctx.lineTo(w,y+Math.cos(t+y*.02)*10);ctx.stroke();}ctx.globalAlpha=1;
-    const cx=w*.5, cy=h*.52; const yaw=Math.sin(t)*.65; const pts=[[-95,-70,80],[95,-70,80],[95,70,80],[-95,70,80],[-95,-70,-80],[95,-70,-80],[95,70,-80],[-95,70,-80]];
-    const proj=pts.map(p=>{let [x,y,z]=p;let x2=x*Math.cos(yaw)-z*Math.sin(yaw), z2=x*Math.sin(yaw)+z*Math.cos(yaw);let s=440/(440+z2);return {x:cx+x2*s,y:cy+y*s,z:z2};});
-    const edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];ctx.lineWidth=2.4;ctx.strokeStyle='rgba(255,255,255,.72)';edges.forEach(e=>{ctx.beginPath();ctx.moveTo(proj[e[0]].x,proj[e[0]].y);ctx.lineTo(proj[e[1]].x,proj[e[1]].y);ctx.stroke();});
-    ctx.fillStyle='rgba(255,209,102,.95)';proj.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,TAU);ctx.fill();});
-    ctx.strokeStyle='rgba(95,213,204,.75)';ctx.lineWidth=1.4;for(let i=0;i<7;i++){ctx.beginPath();let y=cy-130+i*38;ctx.moveTo(70,y+Math.sin(t+i)*10);ctx.bezierCurveTo(220,y-40,430,y+40,560,y+Math.cos(t+i)*10);ctx.stroke();}
-    ctx.fillStyle='rgba(255,255,255,.88)';ctx.font='700 18px system-ui';ctx.fillText('2D drawing ←→ 3D world model',42,h-38);requestAnimationFrame(frame)}frame();}
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const TAU = Math.PI * 2;
 
-// ---------------- data ----------------
-const pipeline=[
- {id:'observe',icon:'👁️',title:'观察 Observe',core:'收集信息，不急着画',code:'image → features',text:'先看锚点、比例、遮挡、光源，不被细节淹没。'},
- {id:'scan',icon:'🔎',title:'拆层 Scan',core:'把一张图拆成通道',code:'depth / normal / albedo',text:'深度、法线、固有色、光照、材质分开看。'},
- {id:'align',icon:'📍',title:'对齐 Align',core:'保持坐标系一致',code:'points → coordinates',text:'中心线、视平线、消失点、骨点都属于同一坐标系统。'},
- {id:'model',icon:'🧊',title:'建模 Model',core:'用几何代理复杂世界',code:'box + sphere + cylinder',text:'人、树、衣服、水都先用简化体块和力场理解。'},
- {id:'render',icon:'💡',title:'渲染 Render',core:'让光和材质进入模型',code:'diffuse + specular + AO',text:'明暗交界线、高光、反光、AO 分开判断。'},
- {id:'fold',icon:'🌀',title:'折叠 Fold',core:'把三维压成二维',code:'projection + selection',text:'透视是投影，风格是选择保留哪些信息。'},
- {id:'style',icon:'🎭',title:'风格 Style',core:'感受变成参数',code:'line / color / contrast',text:'线条粗细、色彩温度、明暗对比、比例变形都在表达情绪。'},
- {id:'calibrate',icon:'⭐',title:'校准 Calibrate',core:'比对、修正、积累经验',code:'prediction ↔ feedback',text:'画错不是失败，是内部模型在更新。'}
+const pipeline = [
+  {t:'观察采样', en:'Observe', d:'眼睛像相机一样采样，但大脑会主动补全。', c:'#54c6d3'},
+  {t:'拆层分析', en:'Scan', d:'结构、深度、法线、光、材质、力、情绪分开看。', c:'#8f7be8'},
+  {t:'坐标对齐', en:'Align', d:'建立画面坐标、物体坐标、相机坐标。', c:'#4a8fd6'},
+  {t:'几何建模', en:'Model', d:'用球、盒、柱、曲面和拓扑理解对象。', c:'#77a987'},
+  {t:'光学渲染', en:'Render', d:'法线、漫反射、高光、AO、材质生成明暗。', c:'#f5b94f'},
+  {t:'二维折叠', en:'Fold', d:'把三维世界投影并压缩到平面。', c:'#ee8e8e'},
+  {t:'风格表达', en:'Style', d:'决定保留、删除、夸张哪些信息。', c:'#d38df0'}
 ];
-const zones=[
- {id:'line',x:105,y:120,c:'#5fd5cc',name:'线之海',en:'Topology',pain:'线条总像贴在纸上',lab:'worldlab',core:'线不是边框，而是面转折、深度不连续和结构关系。'},
- {id:'ratio',x:285,y:190,c:'#ffd166',name:'比例森林',en:'Relations',pain:'不看参考就比例乱',lab:'facelab',core:'比例是坐标点之间的相对关系，不是孤立长度。'},
- {id:'camera',x:480,y:110,c:'#4da8d8',name:'相机塔',en:'Perspective',pain:'透视规则背了也不会用',lab:'perspective',core:'透视是相机模型。视平线、焦距和消失点共同决定投影。'},
- {id:'depth',x:670,y:190,c:'#8d7bea',name:'深度湖',en:'Depth map',pain:'阴影和空间混在一起',lab:'lightlab',core:'深度只表示远近，阴影表示光照关系。先拆开再合成。'},
- {id:'light',x:870,y:120,c:'#f2a7b5',name:'光之月台',en:'Normal & light',pain:'明暗交界线总画不准',lab:'lightlab',core:'交界线来自表面法线与光线夹角，是几何边界。'},
- {id:'material',x:1035,y:260,c:'#8ebf91',name:'材质星市',en:'Material',pain:'颜色和质感不真实',lab:'lightlab',core:'固有色、粗糙度、金属度、菲涅尔、高光和环境反光要分通道。'},
- {id:'folds',x:785,y:410,c:'#e7a666',name:'褶皱剧场',en:'Force',pain:'衣服、头发、风都乱',lab:'foldlab',core:'先找固定点、张力方向、材料硬度，再画线条节奏。'},
- {id:'face',x:525,y:440,c:'#e76f6f',name:'人脸星图',en:'Face model',pain:'人脸结构和彩色明暗容易错',lab:'facelab',core:'头部是三维代理模型：中心线、眼线、面块、五官锚点必须同步变化。'},
- {id:'style',x:260,y:420,c:'#c7a2ff',name:'折叠云城',en:'Style',pain:'很难表达自己的内心',lab:'stylelab',core:'风格是信息压缩策略：保留什么、夸张什么、弱化什么。'}
+
+const islands = [
+  {id:'line', icon:'〰️', name:'线之海', core:'线不是线，是信息边界。', color:'#54c6d3',
+    real:['轮廓随视角改变','结构转折产生边界','力线记录运动或张力'],
+    science:['拓扑 Edge / Face','曲率变化','特征提取与压缩'],
+    drawing:['轮廓线','结构线','褶皱线','漫画强调线'],
+    practice:['同一物体旋转后找轮廓','只用 5 条线压缩物体','区分结构线和装饰线']},
+  {id:'ratio', icon:'📐', name:'比例森林', core:'画准不是背比例，是坐标系一致。', color:'#77a987',
+    real:['对象有相对尺度','局部关系依附全局坐标','负形能校验比例'],
+    science:['坐标系','向量长度比','关键点匹配'],
+    drawing:['锚点','对齐线','参考单位','比例误差'],
+    practice:['记住 5 个锚点再复原','用一个单位搭建人物','检查眼鼻口是否同坐标系']},
+  {id:'camera', icon:'📷', name:'相机塔', core:'透视是一种观看世界的方式。', color:'#4a8fd6',
+    real:['近大远小','平行线汇聚','视平线跟眼高相关'],
+    science:['针孔相机','投影矩阵','FOV / 焦距','消失点'],
+    drawing:['一点/两点/三点透视','广角/长焦','轴测/散点'],
+    practice:['拖相机高度','调 FOV','修复错误盒子','比较正交和透视']},
+  {id:'depth', icon:'🌊', name:'深度湖', core:'深度不是阴影。', color:'#8f7be8',
+    real:['点到观察者有远近','遮挡提供空间顺序','空气让远处低对比'],
+    science:['Depth Map','Z-buffer','单目深度线索'],
+    drawing:['前中后景','深度热力图','大气透视'],
+    practice:['只涂距离不涂阴影','给物体排序近远','把照片拆成三层']},
+  {id:'light', icon:'💡', name:'光之月台', core:'明暗交界线是几何结果。', color:'#f5b94f',
+    real:['表面朝向决定受光','结构会遮挡光','环境会反射回暗部'],
+    science:['Normal · Light','Diffuse','Specular','AO'],
+    drawing:['亮部/半调子/核心暗部/反光','投影','交界线'],
+    practice:['拖光源找交界线','标法线箭头','把真实光影压成漫画阴影块']},
+  {id:'material', icon:'🧪', name:'材质星市', core:'颜色是渲染结果，不是单纯色盘。', color:'#ee8e8e',
+    real:['不同材质反光不同','皮肤半透明','布料高光散'],
+    science:['Albedo','BRDF','Roughness','Fresnel','SSS'],
+    drawing:['固有色','环境色','高光形状','质感边缘'],
+    practice:['同一球切换材质','调粗糙度看高光','把写实材质压成动漫上色']},
+  {id:'fold', icon:'🧵', name:'褶皱山谷', core:'褶皱不是装饰，是力的地图。', color:'#c9895e',
+    real:['布料受固定点约束','重力下垂','拉伸和压缩生成褶皱'],
+    science:['约束点','张力场','材料刚度','曲率'],
+    drawing:['固定点密线','张力长线','压缩碎线','材质硬软'],
+    practice:['单点悬挂','双点张力','肘部压缩','风中飘带']},
+  {id:'human', icon:'👁️', name:'人形剧场', core:'人也是几何，只是关系更复杂。', color:'#d38df0',
+    real:['五官嵌在头部体积里','眼睛围绕眼球','表情改变肌肉张力'],
+    science:['头部代理模型','局部坐标系','参数化比例'],
+    drawing:['中线','眼线','鼻底','嘴线','动漫/Q版参数'],
+    practice:['转头后重放锚点','眼睛挂在曲面上','调风格但保持坐标一致']},
+  {id:'nature', icon:'🌬️', name:'自然流域', core:'风、水、烟、云是力场留下的痕迹。', color:'#5fb6bd',
+    real:['风不可见但能改变物体','水有反射/折射/流线','烟会扩散和破碎'],
+    science:['流场','密度场','粒子轨迹','运动线索'],
+    drawing:['风向线','水流线','烟的边缘破碎','云的体积块'],
+    practice:['通过衣摆推风向','画水绕石头','烟上升扩散','树枝分形']},
+  {id:'style', icon:'✨', name:'风格云城', core:'风格是信息选择与压缩策略。', color:'#f5b94f',
+    real:['感受会改变注意力','观者根据线形色光重建情绪'],
+    science:['视觉认知','形式心理学','参数化风格'],
+    drawing:['线条粗细','色彩倾向','构图空间','明暗对比'],
+    practice:['孤独/紧张/温暖生成视觉参数','写实→动漫→Q版','形成个人风格卡']}
 ];
-const sources=[
- ['透视与成像','线性透视、针孔相机、正交/轴测投影','欧洲学院派透视训练、建筑制图、计算机图形学相机模型'],
- ['计算机视觉','关键点、对齐、三角测量、深度估计','把“画不准”转成坐标点匹配和误差校准'],
- ['计算机图形学','深度图、法线、BRDF、漫反射、高光、AO','把光影和材质拆成可视通道'],
- ['建模软件','Blender / Rhino / SketchUp 的体块、推拉、旋转体、扫掠','把线稿理解成模型操作'],
- ['传统绘画','Loomis 头部、结构素描、解剖、褶皱、色彩理论','把经验知识翻译成可互动的结构练习'],
- ['认知与 ND 设计','低负荷、分层、可视反馈、短关卡、无羞辱校准','帮助学习者把模糊挫败变成具体可修正的信息']
+
+const missions = [
+  {name:'画一个转头动漫人物', steps:['比例森林：放头顶、下巴、眼线、鼻底、嘴线','相机塔：确定 3/4、俯视或仰视','人形剧场：头部球体旋转，中线随曲面弯','光之月台：判断额头、鼻梁、脸颊、下巴明暗','材质星市：皮肤固有色、亮部、暗部、腮红','风格云城：放大眼睛但保持坐标一致']},
+  {name:'画一块可信的布料', steps:['线之海：区分轮廓线、结构线、褶皱线','褶皱山谷：找固定点和张力方向','光之月台：峰谷产生明暗变化','材质星市：选择丝绸/棉布/牛仔/皮革','风格云城：决定保留几条主褶皱线']},
+  {name:'画一个有空间感的房间', steps:['相机塔：选择一点或两点透视','深度湖：分前景、中景、远景','线之海：用结构线组织家具边界','光之月台：找窗光和投影','材质星市：区分木头、布、玻璃','风格云城：决定温暖/孤独/梦幻的视觉参数']},
+  {name:'把感受变成图像', steps:['选择感受：安静、紧张、孤独、温暖、梦','风格云城：生成线条/色彩/空间参数','相机塔：选择观看方式','光之月台：选择柔光或强阴影','材质星市：选择色彩压缩方式','绘画台：输出一张视觉情绪卡']}
 ];
-const emotions=[
- ['安静','低对比、慢线条、远距离、低饱和','线条轻；边缘软；背景留白多'],
- ['紧张','斜线、强透视、高对比、压迫构图','视角低/近；阴影硬；形体压缩'],
- ['温暖','暖光、圆形、低锐度、中高明度','减少黑色；让边缘反光更柔'],
- ['孤独','大空间、小人物、冷色、低饱和','把人物放在远离中心的空白里'],
- ['勇气','上升线、稳定三角、清晰轮廓、强光源','姿态打开；边缘硬；对比更明确'],
- ['梦','不完全透视、柔边缘、渐变、重复节奏','允许空间不完全真实，但内部关系要一致']
+
+const glossary = [
+  {t:'Pinhole Camera 针孔相机', tag:['CV','透视'], plain:'把世界上的三维点，通过一个小孔投到平面上。', use:'解释近大远小、视平线和消失点。', try:'拖 FOV，看盒子透视如何变强。'},
+  {t:'FOV 视场角', tag:['相机','透视'], plain:'相机能看到多宽。FOV 大像广角，FOV 小像长焦。', use:'决定画面夸张程度和空间压缩感。', try:'同一头部用广角和长焦各画一次。'},
+  {t:'Vanishing Point 消失点', tag:['投影几何'], plain:'空间中一组平行线在画面里汇聚的方向终点。', use:'检查盒子、房间、街道是否透视一致。', try:'延长所有水平边，看它们是否汇到同一点。'},
+  {t:'Depth Map 深度图', tag:['CV','空间'], plain:'每个像素到相机的距离图。', use:'把远近关系和阴影分开。', try:'只用三层颜色标出前景/中景/远景。'},
+  {t:'Normal 法线', tag:['CG','光影'], plain:'表面朝向的箭头。', use:'决定这个面会不会被主光照亮。', try:'在球、鼻子、衣褶峰谷上画小箭头。'},
+  {t:'Diffuse 漫反射', tag:['CG','明暗'], plain:'光打到粗糙表面后向四周散开。', use:'解释大多数素描明暗的基础。', try:'先忽略高光，只画表面朝光程度。'},
+  {t:'Specular 高光', tag:['CG','材质'], plain:'镜面方向的反射。材质越光滑，高光越集中。', use:'区分金属、塑料、皮肤、玻璃。', try:'调粗糙度，看高光从尖变散。'},
+  {t:'BRDF 双向反射分布函数', tag:['CG','材质'], plain:'描述光从某方向来、往某方向反射多少的规则。', use:'把材质从“背口诀”变成参数理解。', try:'比较石膏、金属、布料的高光和暗部。'},
+  {t:'Fresnel 菲涅尔', tag:['光学'], plain:'视线越贴着表面看，反射越强。', use:'解释水面、玻璃、皮肤边缘反光。', try:'给球体边缘加弱反光，不要随便全亮。'},
+  {t:'AO 环境光遮蔽', tag:['CG','暗部'], plain:'缝隙里来自环境的散射光更少，所以更暗。', use:'解释嘴角、眼角、衣褶深处的暗。', try:'只给接缝和褶皱谷加 AO，不要把整个暗面涂死。'},
+  {t:'Triangulation 三角测量', tag:['CV','多视角'], plain:'用多个视角的对应点推断空间位置。', use:'解释为什么画人要看正面、侧面、3/4。', try:'用正面和侧面推断鼻尖在 45° 的位置。'},
+  {t:'Topology 拓扑', tag:['建模','结构'], plain:'点、边、面如何连接。', use:'解释结构线和体块连续性。', try:'给头部画眼眶、嘴部、下颌的环线。'},
+  {t:'Mesh 网格', tag:['建模'], plain:'由很多顶点、边、面组成的三维表面。', use:'把复杂对象拆成可理解的面。', try:'把苹果、杯子、脸想象成低模网格。'},
+  {t:'NURBS 曲面', tag:['建模'], plain:'用控制点生成平滑曲面的数学方法。', use:'理解流畅轮廓、车身、花瓶、人体大曲线。', try:'用少数控制线概括长曲线。'},
+  {t:'Shader 着色器', tag:['CG'], plain:'告诉计算机每个像素应该是什么颜色的程序。', use:'把颜色拆成固有色、光、材质、阴影。', try:'画一张图时分层标注 albedo/diffuse/specular。'},
+  {t:'Parametric Modeling 参数化建模', tag:['建模','风格'], plain:'改变参数就改变模型。', use:'解释动漫/Q版比例和个人风格。', try:'调头身比、眼睛大小、线条粗细，看信息如何压缩。'}
 ];
-function renderPipeline(){ $('pipelineGrid').innerHTML=pipeline.map(p=>`<article class="pipe-card"><b>${p.icon} ${p.title}</b><p><strong>${p.core}</strong></p><code>${p.code}</code><p>${p.text}</p></article>`).join('');}
-function renderSources(){ $('sourceGrid').innerHTML=sources.map(s=>`<article class="source"><b>${s[0]}</b><small>${s[1]}</small><div class="chips"><span class="chip">${s[2]}</span></div></article>`).join(''); $('emotionGrid').innerHTML=emotions.map(e=>`<article class="emotion"><b>${e[0]}</b><small>${e[1]}</small><div class="chips"><span class="chip">${e[2]}</span></div></article>`).join('');}
-function renderMap(){const svg=$('worldMap');let links='';for(let i=0;i<zones.length-1;i++){links+=`<path class="map-link" d="M${zones[i].x},${zones[i].y} C${(zones[i].x+zones[i+1].x)/2},${zones[i].y-60} ${(zones[i].x+zones[i+1].x)/2},${zones[i+1].y+60} ${zones[i+1].x},${zones[i+1].y}"/>`}let nodes=zones.map(z=>`<g class="map-node" onclick="selectZone('${z.id}')"><circle cx="${z.x}" cy="${z.y}" r="54" fill="${z.c}" opacity=".9"/><text x="${z.x}" y="${z.y-6}" text-anchor="middle" font-size="20">${z.name}</text><text x="${z.x}" y="${z.y+22}" text-anchor="middle" font-size="13">${z.en}</text></g>`).join('');svg.innerHTML=`<rect x="20" y="20" width="1160" height="580" rx="36" fill="rgba(255,255,255,.36)" stroke="rgba(43,52,60,.10)"/>${links}${nodes}`;selectZone('camera');}
-function selectZone(id){const z=zones.find(x=>x.id===id)||zones[0];$('mapInspector').innerHTML=`<p class="eyebrow">${z.en}</p><h3>${z.name}</h3><p><b>痛点：</b>${z.pain}</p><p><b>核心：</b>${z.core}</p><div class="chips"><span class="chip">原理</span><span class="chip">互动</span><span class="chip">纸上练习</span></div><button class="primary" onclick="go('${z.lab}')">进入对应实验</button>`;} window.selectZone=selectZone;
 
-// ---------------- world / 3D lab ----------------
-let world={objects:[],selected:null,mode:'fallback',three:null,scene:null,camera:null,renderer:null,light:null,drag:null,raycaster:null,mouse:null,plane:null};
-let objSeq=1;
-function updateSelect(){const s=$('worldSelect');s.innerHTML=world.objects.map(o=>`<option value="${o.id}" ${o.id===world.selected?'selected':''}>${o.name}</option>`).join('');}
-function addWorldShape(type){const id='obj'+(objSeq++); const obj={id,type,name:type+' '+id,x:rand(-1.4,1.4),y:rand(-.8,.8),z:0,scale:1,rot:0,color:$('worldBaseColor')?.value||'#f3b2a6'}; if(type==='room'){obj.x=0;obj.y=0;obj.scale=1.4} world.objects.push(obj); world.selected=id; if(world.mode==='three'&&world.three) createThreeMesh(obj); updateSelect(); renderFallbackWorld(); updateWorldLesson(); toast('已添加 '+type);} window.addWorldShape=addWorldShape;
-function selectWorldObject(id){world.selected=id; if(world.mode==='three') markThreeSelection(); renderFallbackWorld(); updateWorldLesson();} window.selectWorldObject=selectWorldObject;
-function deleteSelectedWorldObject(){if(!world.selected){toast('没有选中对象');return} const id=world.selected; const obj=world.objects.find(o=>o.id===id); if(obj?.mesh && world.scene) world.scene.remove(obj.mesh); world.objects=world.objects.filter(o=>o.id!==id); world.selected=world.objects[0]?.id||null; updateSelect(); renderFallbackWorld(); updateWorldLesson(); toast('已删除选中几何');} window.deleteSelectedWorldObject=deleteSelectedWorldObject;
-function duplicateSelectedWorldObject(){const o=world.objects.find(x=>x.id===world.selected); if(!o)return; const n={...o,id:'obj'+(objSeq++),name:o.type+' copy',x:o.x+.35,y:o.y+.22,mesh:null}; world.objects.push(n); world.selected=n.id; if(world.mode==='three') createThreeMesh(n); updateSelect(); renderFallbackWorld(); updateWorldLesson();} window.duplicateSelectedWorldObject=duplicateSelectedWorldObject;
-function updateWorldLesson(){const o=world.objects.find(x=>x.id===world.selected); $('worldLesson').innerHTML=o?`<b>选中：</b>${o.name}<br><b>绘画翻译：</b>${shapeLesson(o.type)}<br><br><b>检查：</b>先用几何代理确定体块和朝向，再用材质参数决定明暗和高光。不要先画细节。`:'<b>提示：</b>添加一个形体，拖动它，把线稿理解为模型操作。';}
-function shapeLesson(t){return {box:'盒体适合房间、头部平面、躯干、家具。检查透视一致性。',sphere:'球适合头颅、关节、苹果、云团。重点看法线和明暗交界线。',cylinder:'圆柱适合手臂、杯子、树干。检查椭圆与轴线。',cone:'圆锥适合鼻子、屋顶、裙摆概括。',ribbon:'飘带适合头发、布料、水流路径。看固定点和力场。',room:'房间帮助理解一点/两点透视和空间包围感。'}[t]||'几何代理帮助把复杂对象转成可计算结构。'}
-function updateCameraControls(){if(world.mode==='three'&&world.camera) updateThreeCamera(); renderFallbackWorld();} window.updateCameraControls=updateCameraControls;
-function updateWorldMaterial(){if(world.mode==='three'){world.objects.forEach(o=>{if(o.mesh&&o.mesh.material){o.mesh.material.color.set($('worldBaseColor').value);o.mesh.material.roughness=+$('roughness').value/100;o.mesh.material.metalness=+$('metalness').value/100;o.mesh.material.wireframe=$('wireToggle').checked;o.mesh.material.needsUpdate=true;}}); if(world.light){const a=(+$('worldLight').value)*Math.PI/180;world.light.position.set(Math.cos(a)*5,4,Math.sin(a)*5)}} renderFallbackWorld();renderShadingLab();} window.updateWorldMaterial=updateWorldMaterial;
-function renderFallbackWorld(){const c=$('fallback3D'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);let g=ctx.createLinearGradient(0,0,w,h);g.addColorStop(0,'#eff8f8');g.addColorStop(1,'#fff4df');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);const yaw=+$('camYaw').value*Math.PI/180,pitch=+$('camPitch').value*Math.PI/180,fov=+$('camFov').value;ctx.strokeStyle='rgba(77,168,216,.28)';ctx.lineWidth=1;const vp={x:w/2+Math.sin(yaw)*160,y:h*.52-Math.sin(pitch)*130};for(let x=-400;x<w+500;x+=55){ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(vp.x,vp.y);ctx.stroke()}for(let y=80;y<h;y+=55){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y+Math.sin(yaw)*30);ctx.stroke()}ctx.fillStyle='rgba(37,49,58,.8)';ctx.font='700 14px system-ui';ctx.fillText('2.5D fallback：拖动形体；加载 WebGL 后可真实 3D',18,30);
-  const light=(+$('worldLight').value)*Math.PI/180; const base=hexToRgb($('worldBaseColor').value); const rough=+$('roughness').value/100;
-  function project(o){const sx=w/2+o.x*150*Math.cos(yaw)+o.z*80*Math.sin(yaw);const sy=h/2-o.y*130+o.z*70*Math.sin(pitch);const s=(1.15-o.z*.08)*(60+fov)/105*o.scale;return {sx,sy,s};}
-  world.objects.forEach(o=>{const p=project(o);ctx.save();ctx.translate(p.sx,p.sy);ctx.rotate(o.rot);ctx.globalAlpha=o.id===world.selected?1:.78;const shade=Math.max(.25,.65+.35*Math.cos(light-o.x));const fill=rgbToHex(base.r*shade,base.g*shade,base.b*shade);ctx.fillStyle=fill;ctx.strokeStyle=o.id===world.selected?'#ffd166':'#263240';ctx.lineWidth=o.id===world.selected?4:2;if(o.type==='box'||o.type==='room'){let bw=p.s*(o.type==='room'?2.4:1.4),bh=p.s*(o.type==='room'?1.35:1);ctx.fillRect(-bw/2,-bh/2,bw,bh);ctx.strokeRect(-bw/2,-bh/2,bw,bh);ctx.strokeStyle='rgba(38,50,64,.35)';ctx.beginPath();ctx.moveTo(-bw/2,-bh/2);ctx.lineTo(-bw/2+p.s*.45,-bh/2-p.s*.45);ctx.lineTo(bw/2+p.s*.45,-bh/2-p.s*.45);ctx.lineTo(bw/2,-bh/2);ctx.stroke();}
-    else if(o.type==='sphere'){let rg=p.s*.78;let grd=ctx.createRadialGradient(-rg*.35,-rg*.45,rg*.05,0,0,rg);grd.addColorStop(0,'#fff8d6');grd.addColorStop(.35,fill);grd.addColorStop(1,'#5e5960');ctx.fillStyle=grd;ctx.beginPath();ctx.arc(0,0,rg,0,TAU);ctx.fill();ctx.stroke();}
-    else if(o.type==='cylinder'){let rw=p.s*.62,rh=p.s*1.35;ctx.beginPath();ctx.ellipse(0,-rh/2,rw,rw*.28,0,0,TAU);ctx.fill();ctx.stroke();ctx.fillRect(-rw,-rh/2,rw*2,rh);ctx.strokeRect(-rw,-rh/2,rw*2,rh);ctx.beginPath();ctx.ellipse(0,rh/2,rw,rw*.28,0,0,TAU);ctx.fill();ctx.stroke();}
-    else if(o.type==='cone'){ctx.beginPath();ctx.moveTo(0,-p.s);ctx.lineTo(p.s*.8,p.s*.75);ctx.lineTo(-p.s*.8,p.s*.75);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(0,p.s*.75,p.s*.8,p.s*.22,0,0,TAU);ctx.stroke();}
-    else {ctx.beginPath();for(let i=0;i<80;i++){const t=i/79;const x=(t-.5)*p.s*2.2;const y=Math.sin(t*TAU*1.4+o.x)*p.s*.25+t*p.s*.75; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.lineWidth=9-rough*5;ctx.strokeStyle=fill;ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle=o.id===world.selected?'#ffd166':'#263240';ctx.stroke();}
-    ctx.restore();});}
-function fallbackHit(pt){const c=$('fallback3D'),w=c.width,h=c.height;let best=null,bd=9999;world.objects.forEach(o=>{const sx=w/2+o.x*150,sy=h/2-o.y*130,d=Math.hypot(pt.x-sx,pt.y-sy);if(d<80&&d<bd){best=o;bd=d}});return best;}
-function bindFallbackDrag(){const c=$('fallback3D');let drag=null;c.addEventListener('pointerdown',e=>{const p=canvasPoint(c,e);const o=fallbackHit(p);if(o){drag={id:o.id,dx:p.x-(c.width/2+o.x*150),dy:p.y-(c.height/2-o.y*130)};world.selected=o.id;updateSelect();renderFallbackWorld();}});c.addEventListener('pointermove',e=>{if(!drag)return;const p=canvasPoint(c,e);const o=world.objects.find(x=>x.id===drag.id);o.x=(p.x-drag.dx-c.width/2)/150;o.y=-(p.y-drag.dy-c.height/2)/130;renderFallbackWorld();});window.addEventListener('pointerup',()=>drag=null);}
-async function loadThreeLab(){ if(world.mode==='three'){toast('WebGL 已经运行');return} $('webglStatus').textContent='正在加载 Three.js...'; try{const THREE=await import('https://unpkg.com/three@0.160.0/build/three.module.js'); initThree(THREE); toast('WebGL 实验室已启动');}catch(e){console.warn(e);$('webglStatus').textContent='Three.js CDN 加载失败，保持 2.5D 引擎。上传 GitHub Pages 或使用网络环境再试。';toast('WebGL 加载失败，但其他互动可用');}} window.loadThreeLab=loadThreeLab;
-function initThree(THREE){world.three=THREE;world.mode='three';$('fallback3D').style.display='none';const host=$('threeViewport');host.innerHTML='';world.scene=new THREE.Scene();world.scene.background=new THREE.Color(0xf2faf9);world.camera=new THREE.PerspectiveCamera(48,host.clientWidth/host.clientHeight,0.1,100);world.renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});world.renderer.setPixelRatio(Math.min(devicePixelRatio,2));world.renderer.setSize(host.clientWidth,host.clientHeight);host.appendChild(world.renderer.domElement);world.light=new THREE.DirectionalLight(0xffffff,1.25);world.scene.add(world.light);world.scene.add(new THREE.HemisphereLight(0xffffff,0x88aacc,.75));const grid=new THREE.GridHelper(8,16,0x88b7bf,0xd0e4e1);world.scene.add(grid);world.raycaster=new THREE.Raycaster();world.mouse=new THREE.Vector2();world.plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);world.objects.forEach(createThreeMesh);if(!world.objects.length)addWorldShape('box');updateThreeCamera();updateWorldMaterial();bindThreeDrag();function animate(){requestAnimationFrame(animate);world.renderer.render(world.scene,world.camera)}animate();window.addEventListener('resize',()=>{world.camera.aspect=host.clientWidth/host.clientHeight;world.camera.updateProjectionMatrix();world.renderer.setSize(host.clientWidth,host.clientHeight)});$('webglStatus').textContent='WebGL 已运行：点击/拖动物体；可删除、保存视角、截图。';}
-function createThreeMesh(o){const THREE=world.three;if(!THREE||!world.scene)return;let geo;if(o.type==='sphere')geo=new THREE.SphereGeometry(.55,32,18);else if(o.type==='cylinder')geo=new THREE.CylinderGeometry(.45,.45,1.25,32);else if(o.type==='cone')geo=new THREE.ConeGeometry(.55,1.25,32);else if(o.type==='ribbon'){geo=new THREE.TorusKnotGeometry(.45,.09,80,8,1,3)}else if(o.type==='room')geo=new THREE.BoxGeometry(2.4,1.35,1.8);else geo=new THREE.BoxGeometry(1,1,1);const mat=new THREE.MeshStandardMaterial({color:$('worldBaseColor').value,roughness:+$('roughness').value/100,metalness:+$('metalness').value/100,wireframe:$('wireToggle').checked});const mesh=new THREE.Mesh(geo,mat);mesh.position.set(o.x,0.5+o.y,o.z);mesh.userData.id=o.id;world.scene.add(mesh);o.mesh=mesh;markThreeSelection();}
-function markThreeSelection(){if(!world.three)return;world.objects.forEach(o=>{if(o.mesh){o.mesh.scale.setScalar(o.id===world.selected?1.13:1);}})}
-function updateThreeCamera(){const THREE=world.three;if(!THREE||!world.camera)return;const yaw=+$('camYaw').value*Math.PI/180,pitch=+$('camPitch').value*Math.PI/180,dist=6;world.camera.fov=+$('camFov').value;world.camera.position.set(Math.sin(yaw)*dist,2.8+Math.sin(pitch)*2.2,Math.cos(yaw)*dist);world.camera.lookAt(0,0.4,0);world.camera.updateProjectionMatrix();}
-function bindThreeDrag(){const canvas=world.renderer.domElement;let drag=null;canvas.addEventListener('pointerdown',e=>{const r=canvas.getBoundingClientRect();world.mouse.x=((e.clientX-r.left)/r.width)*2-1;world.mouse.y=-((e.clientY-r.top)/r.height)*2+1;world.raycaster.setFromCamera(world.mouse,world.camera);const hits=world.raycaster.intersectObjects(world.objects.map(o=>o.mesh).filter(Boolean));if(hits[0]){const id=hits[0].object.userData.id;world.selected=id;updateSelect();markThreeSelection();drag={id};canvas.setPointerCapture(e.pointerId);}});canvas.addEventListener('pointermove',e=>{if(!drag)return;const THREE=world.three,r=canvas.getBoundingClientRect();world.mouse.x=((e.clientX-r.left)/r.width)*2-1;world.mouse.y=-((e.clientY-r.top)/r.height)*2+1;world.raycaster.setFromCamera(world.mouse,world.camera);const pt=new THREE.Vector3();world.raycaster.ray.intersectPlane(world.plane,pt);const o=world.objects.find(x=>x.id===drag.id);if(o&&o.mesh){o.x=pt.x;o.z=pt.z;o.mesh.position.x=pt.x;o.mesh.position.z=pt.z;}});window.addEventListener('pointerup',()=>drag=null)}
-function saveWorldSnapshot(){const views=JSON.parse(localStorage.getItem('drawescape_views_v6')||'[]');views.push({name:'view '+(views.length+1),date:new Date().toLocaleString(),yaw:+$('camYaw').value,pitch:+$('camPitch').value,fov:+$('camFov').value,objects:world.objects.map(o=>({id:o.id,type:o.type,name:o.name,x:o.x,y:o.y,z:o.z,scale:o.scale,color:o.color}))});localStorage.setItem('drawescape_views_v6',JSON.stringify(views));refreshSavedViews();toast('已保存视角与场景');} window.saveWorldSnapshot=saveWorldSnapshot;
-function refreshSavedViews(){const sel=$('savedViews');if(!sel)return;const views=JSON.parse(localStorage.getItem('drawescape_views_v6')||'[]');sel.innerHTML='<option value="">选择保存视角</option>'+views.map((v,i)=>`<option value="${i}">${v.name} · ${v.date}</option>`).join('');}
-function restoreWorldSnapshot(i){if(i==='')return;const v=JSON.parse(localStorage.getItem('drawescape_views_v6')||'[]')[+i];if(!v)return;$('camYaw').value=v.yaw;$('camPitch').value=v.pitch;$('camFov').value=v.fov;if(Array.isArray(v.objects)){if(world.mode==='three'&&world.scene){world.objects.forEach(o=>o.mesh&&world.scene.remove(o.mesh));}world.objects=v.objects.map(o=>({...o,mesh:null}));world.selected=world.objects[0]?.id||null;if(world.mode==='three')world.objects.forEach(createThreeMesh);updateSelect();}updateCameraControls();renderFallbackWorld();toast('已恢复视角');} window.restoreWorldSnapshot=restoreWorldSnapshot;
-function exportWorldShot(){if(world.mode==='three'&&world.renderer){const a=document.createElement('a');a.href=world.renderer.domElement.toDataURL('image/png');a.download='drawescape_webgl_view.png';a.click();}else exportCanvas('fallback3D','drawescape_25d_view.png');} window.exportWorldShot=exportWorldShot;
-function exportWorldJSON(){downloadBlob('drawescape_scene.json',JSON.stringify({camera:{yaw:+$('camYaw').value,pitch:+$('camPitch').value,fov:+$('camFov').value},objects:world.objects},null,2));} window.exportWorldJSON=exportWorldJSON;
+const explanations = {
+  projection:{title:'相机塔讲解：透视是成像，不是口诀', html:`<p>透视的本质是三维点投到二维平面。欧洲美术中的一点、两点、三点透视，是不同空间方向在画面上汇聚的结果。</p><div class="mini"><strong>现实：</strong>离相机越近，同样大小的物体占据画面越大。</div><div class="mini"><strong>计算机：</strong>三维坐标经过投影矩阵，得到屏幕坐标。</div><div class="mini"><strong>绘画：</strong>视平线、消失点、焦距、广角/长焦，都是观看世界的方式。</div><h4>练习方法</h4><p>先画一个盒子，不追求好看，只检查三组边是否分别指向正确方向。然后改变 FOV，观察同一个盒子怎样变得夸张或平稳。</p>`},
+  light:{title:'光之月台讲解：明暗交界线如何生成', html:`<p>明暗交界线是体块转向的结果。它不是一条随意的暗边，而是表面逐渐转到主光照不到的位置。</p><div class="mini"><strong>现实：</strong>表面朝光更亮，背光更暗，缝隙更暗。</div><div class="mini"><strong>计算机：</strong>最基础的漫反射可理解为表面法线与光线方向的点积。</div><div class="mini"><strong>绘画：</strong>先判断大体块的朝向，再画半调子、核心暗部、反光、AO。</div><h4>练习方法</h4><p>每次画阴影前先画小法线箭头：额头朝哪里？鼻梁朝哪里？脸颊朝哪里？这样暗部才会跟体积一致。</p>`},
+  fold:{title:'褶皱山谷讲解：褶皱是力的地图', html:`<p>褶皱不是随机线条。它由固定点、重力、拉力、压缩和材料硬度共同生成。</p><div class="mini"><strong>现实：</strong>布料挂在哪里，哪里就会聚集力；自由端会下垂或被风带走。</div><div class="mini"><strong>计算机：</strong>可以用约束点、弹簧、粒子和材质刚度模拟。</div><div class="mini"><strong>绘画：</strong>固定点附近线密，张力方向线长，压缩处线碎，硬布折线多，软布曲线多。</div>`},
+  face:{title:'人形剧场讲解：五官必须挂在头部坐标系上', html:`<p>人脸画错常常不是眼睛本身画错，而是眼睛没有跟着头部体块转。眼睛、鼻子、嘴巴都必须依附在同一个头部坐标系。</p><div class="mini"><strong>现实：</strong>头部像一个带面部平面的体块，五官嵌在曲面上。</div><div class="mini"><strong>计算机：</strong>可理解为参数化头部代理模型：中心线、眼线、鼻底线、嘴线随旋转变化。</div><div class="mini"><strong>绘画：</strong>动漫化可以夸张比例，但不能让五官脱离结构。</div>`},
+  material:{title:'材质星市讲解：颜色是渲染结果', html:`<p>颜色不是单独挑出来的漂亮色。它是固有色、光源色、环境色、表面朝向、高光和材质参数共同作用的结果。</p><div class="mini"><strong>现实：</strong>皮肤、金属、玻璃、布料对光的反应不同。</div><div class="mini"><strong>计算机：</strong>材质通常由 albedo、roughness、metalness、specular、fresnel 等参数描述。</div><div class="mini"><strong>绘画：</strong>先想材质，再决定高光大小、暗部颜色、边缘反光和色块压缩方式。</div>`},
+  style:{title:'风格云城讲解：感受如何变成图像', html:`<p>感受不是直接画出来的，它要被翻译成视觉参数：线条、颜色、比例、空间、明暗、节奏。</p><div class="mini"><strong>现实：</strong>感受会改变我们注意哪些信息。</div><div class="mini"><strong>认知：</strong>观者通过形状、色彩、对比和构图重建情绪。</div><div class="mini"><strong>绘画：</strong>风格就是保留什么、删掉什么、夸张什么。</div>`}
+};
 
-// ---------------- perspective canvas ----------------
-let persp={mode:'two',vp1:{x:210,y:250},vp2:{x:790,y:245},vp3:{x:520,y:-260},horizon:250,drag:null,strokes:[],drawing:null};
-function setPerspectiveMode(m){persp.mode=m;drawPerspective();toast(m+' 透视模式');} window.setPerspectiveMode=setPerspectiveMode;
-function drawPerspective(){const c=$('perspectiveCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fffaf1';ctx.fillRect(0,0,w,h);ctx.lineWidth=1;ctx.strokeStyle='rgba(38,50,64,.12)';for(let x=0;x<w;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}for(let y=0;y<h;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}ctx.strokeStyle='rgba(77,168,216,.7)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,persp.horizon);ctx.lineTo(w,persp.horizon);ctx.stroke();ctx.fillStyle='#4da8d8';ctx.font='800 14px system-ui';ctx.fillText('视平线 / eye level',14,persp.horizon-8);
-  if($('drawAssist')?.checked!==false){const vps=persp.mode==='one'?[{x:w/2,y:persp.horizon}]:persp.mode==='ortho'?[]:persp.mode==='three'?[persp.vp1,persp.vp2,persp.vp3]:[persp.vp1,persp.vp2];ctx.strokeStyle='rgba(141,123,234,.45)';ctx.lineWidth=1.4;vps.forEach(vp=>{for(let x=-100;x<=w+100;x+=90){ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(vp.x,vp.y);ctx.stroke()}for(let y=0;y<=h;y+=110){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(vp.x,vp.y);ctx.stroke();ctx.beginPath();ctx.moveTo(w,y);ctx.lineTo(vp.x,vp.y);ctx.stroke()}});ctx.strokeStyle='rgba(142,191,145,.55)';if(persp.mode==='ortho'){for(let x=-200;x<w+300;x+=55){ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(x+360,0);ctx.stroke()}for(let x=-200;x<w+300;x+=55){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+360,h);ctx.stroke()}}}
-  ctx.lineCap='round';ctx.lineJoin='round';persp.strokes.forEach(s=>{ctx.strokeStyle=s.color;ctx.lineWidth=s.width;ctx.beginPath();s.pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke()});if(persp.drawing){ctx.strokeStyle=persp.drawing.color;ctx.lineWidth=persp.drawing.width;ctx.beginPath();persp.drawing.pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();}
-  const pts=persp.mode==='one'?[{x:w/2,y:persp.horizon,label:'VP'}]:persp.mode==='ortho'?[]:[{...persp.vp1,label:'VP1'},{...persp.vp2,label:'VP2'}].concat(persp.mode==='three'?[{...persp.vp3,label:'VP3'}]:[]);pts.forEach(p=>{ctx.fillStyle='#ffd166';ctx.strokeStyle='#263240';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,11,0,TAU);ctx.fill();ctx.stroke();ctx.fillStyle='#263240';ctx.fillText(p.label,p.x+13,p.y-8)});
-  ctx.fillStyle='rgba(38,50,64,.78)';ctx.fillText('拖动 VP / 视平线；在网格上画结构线。',18,h-22)}
-function bindPerspective(){const c=$('perspectiveCanvas');c.addEventListener('pointerdown',e=>{const p=canvasPoint(c,e);const near=(a,b)=>Math.hypot(p.x-a.x,p.y-a.y)<24;if(persp.mode!=='ortho' && near(persp.vp1)){persp.drag='vp1';return}if(persp.mode!=='one'&&persp.mode!=='ortho'&&near(persp.vp2)){persp.drag='vp2';return}if(persp.mode==='three'&&near(persp.vp3)){persp.drag='vp3';return}if(Math.abs(p.y-persp.horizon)<12){persp.drag='horizon';return}persp.drawing={color:$('pencilColor').value,width:+$('pencilWidth').value,pts:[p]};});c.addEventListener('pointermove',e=>{const p=canvasPoint(c,e);if(persp.drag){if(persp.drag==='horizon'){persp.horizon=p.y;persp.vp1.y=p.y;persp.vp2.y=p.y}else persp[persp.drag]=p;drawPerspective();return}if(persp.drawing){persp.drawing.pts.push(p);drawPerspective();}});window.addEventListener('pointerup',()=>{if(persp.drawing){persp.strokes.push(persp.drawing);persp.drawing=null}persp.drag=null;drawPerspective();});}
-function clearPerspectiveDrawing(){persp.strokes=[];drawPerspective();} window.clearPerspectiveDrawing=clearPerspectiveDrawing;
-function savePerspectiveSetup(){localStorage.setItem('drawescape_perspective_v6',JSON.stringify({mode:persp.mode,vp1:persp.vp1,vp2:persp.vp2,vp3:persp.vp3,horizon:persp.horizon}));toast('已保存透视坐标系');} window.savePerspectiveSetup=savePerspectiveSetup;
+const emotions = {
+  calm:{name:'安静', line:'长线、少断裂、低速度', color:'#8fb7a1', space:'留白多，水平构图', light:'柔光、低对比'},
+  tension:{name:'紧张', line:'尖线、碎线、斜向力', color:'#e96f63', space:'倾斜、压迫、近景', light:'强阴影、高对比'},
+  lonely:{name:'孤独', line:'细线、小人物、大空白', color:'#708bb7', space:'远景、大尺度空间', light:'冷光、弱反光'},
+  warm:{name:'温暖', line:'圆线、包围、柔边缘', color:'#f0b36b', space:'近中景、围合构图', light:'暖光、柔暗部'},
+  dream:{name:'梦', line:'漂浮线、弱重力、渐变', color:'#b59cf2', space:'弱透视、非现实比例', light:'边缘光、雾化'}
+};
+let activeEmotion = 'calm';
+let selectedIsland = 'camera';
 
-// ---------------- shading ----------------
-function renderShadingLab(){const c=$('shadingCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height;const img=ctx.createImageData(w,h);const base=hexToRgb($('shadeColor')?.value||'#d8a07f');const angle=(+$('shadeAngle')||315)*Math.PI/180;const elev=(+$('shadeHeight')||40)*Math.PI/180;const rough=(+$('shadeRough')||35)/100;const metal=(+$('shadeMetal')||0)/100;const ao=(+$('shadeAO')||40)/100;const L={x:Math.cos(angle)*Math.cos(elev),y:-Math.sin(elev),z:Math.sin(angle)*Math.cos(elev)};const cx=w*.42,cy=h*.5,R=Math.min(w,h)*.34;let term=[];for(let y=0;y<h;y++){for(let x=0;x<w;x++){let dx=(x-cx)/R,dy=(y-cy)/R,d2=dx*dx+dy*dy;let i=(y*w+x)*4;let col={r:255,g:250,b:241};if(d2<=1){let z=Math.sqrt(1-d2),N={x:dx,y:dy,z};let ndl=N.x*L.x+N.y*L.y+N.z*L.z;let diff=Math.max(0,ndl);let fres=Math.pow(1-Math.max(0,z),3);let specPow=lerp(80,8,rough);let H={x:L.x,y:L.y,z:L.z+1};let hl=Math.hypot(H.x,H.y,H.z);H.x/=hl;H.y/=hl;H.z/=hl;let ndh=Math.max(0,N.x*H.x+N.y*H.y+N.z*H.z);let spec=Math.pow(ndh,specPow)*(1-rough*.72);let ambient=.28;let cavity=1-ao*Math.pow(Math.max(0,dy+.55),2)*.8;let env={r:160,g:195,b:210};let diffuse=mix(base,env,metal*.55);col.r=(diffuse.r*(ambient+diff*.82)*cavity)+255*spec*(metal?0.9:.55)+env.r*fres*.28;col.g=(diffuse.g*(ambient+diff*.82)*cavity)+245*spec*(metal?0.9:.55)+env.g*fres*.28;col.b=(diffuse.b*(ambient+diff*.82)*cavity)+220*spec*(metal?0.9:.55)+env.b*fres*.28;if(Math.abs(ndl)<.015)term.push([x,y]);}img.data[i]=clamp(col.r,0,255);img.data[i+1]=clamp(col.g,0,255);img.data[i+2]=clamp(col.b,0,255);img.data[i+3]=255;}}ctx.putImageData(img,0,0);ctx.strokeStyle='#263240';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.stroke();if($('showTerminator')?.checked){ctx.fillStyle='#e76f6f';term.filter((_,i)=>i%9===0).forEach(p=>ctx.fillRect(p[0],p[1],2,2));}ctx.fillStyle='#263240';ctx.font='800 14px system-ui';ctx.fillText('红点 = 明暗交界线附近：N · L ≈ 0',18,26);drawMaterialSwatches(ctx,w,h,base,rough,metal);
- $('shadeExplain').innerHTML=`<b>通道拆解</b><br>固有色 Albedo：物体本身的颜色。<br>漫反射 Diffuse：由表面法线与光线夹角决定。<br>高光 Specular：粗糙度越低越小越亮。<br>金属度 Metalness：越高越反射环境，固有色更像反射色。<br>AO：缝隙和贴近处缺少环境光，所以更暗。<br><br><b>绘画练习：</b>先找交界线，再找投影和 AO，最后点高光。不要把所有暗部都画成同一种黑。`;}
-function drawMaterialSwatches(ctx,w,h,base,rough,metal){const x=w*.72,y=70;ctx.font='800 13px system-ui';[['Albedo',base],['Light',mix(base,{r:255,g:245,b:180},.55)],['Shadow',mix(base,{r:45,g:55,b:75},.58)],['Env',mix(base,{r:130,g:180,b:205},.35)],['Highlight',mix(base,{r:255,g:255,b:245},1-rough*.5)]].forEach((s,i)=>{ctx.fillStyle=rgbToHex(s[1].r,s[1].g,s[1].b);ctx.fillRect(x,y+i*48,92,32);ctx.strokeStyle='#26324033';ctx.strokeRect(x,y+i*48,92,32);ctx.fillStyle='#263240';ctx.fillText(s[0],x+105,y+i*48+22)});ctx.fillText('Metal '+Math.round(metal*100)+'%',x,y+270)}
+function initUI(){
+  document.querySelectorAll('[data-jump]').forEach(btn=>btn.addEventListener('click',()=>$(btn.dataset.jump).scrollIntoView({behavior:'smooth'})));
+  $('toggleCalm').addEventListener('click',()=>document.body.classList.toggle('calm'));
+  $('expandAll').addEventListener('click',()=>{ document.querySelectorAll('.island').forEach(x=>x.classList.add('active')); renderKnowledge(selectedIsland); });
+  $('collapseAll').addEventListener('click',()=>document.querySelectorAll('.island').forEach(x=>x.classList.remove('active')));
+  $('closeDrawer').addEventListener('click',closeDrawer); $('drawerBack').addEventListener('click',closeDrawer);
+  document.querySelectorAll('[data-read]').forEach(b=>b.addEventListener('click',()=>openDrawer(b.dataset.read)));
+  $('glossarySearch').addEventListener('input',renderGlossary);
+}
 
-// ---------------- folds/nature ----------------
-let natureMode='cloth',particles=[];
-function setNatureMode(m){natureMode=m;initParticles();renderFoldLab();toast('模式：'+m)} window.setNatureMode=setNatureMode;
-function initParticles(){particles=Array.from({length:90},(_,i)=>({x:rand(80,820),y:rand(80,500),vx:rand(-.5,.5),vy:rand(-.6,.3),r:rand(2,8),life:rand(.2,1)}));}
-function renderFoldLab(){const c=$('foldCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fffaf1';ctx.fillRect(0,0,w,h);ctx.strokeStyle='rgba(77,168,216,.18)';for(let x=0;x<w;x+=45){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}for(let y=0;y<h;y+=45){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}const tension=+$('foldTension').value/100,stiff=+$('foldStiffness').value/100,wind=+$('foldWind').value,complex=+$('foldComplexity').value;
- if(natureMode==='cloth')drawCloth(ctx,w,h,tension,stiff,wind,complex);else if(natureMode==='hair')drawHair(ctx,w,h,tension,stiff,wind,complex);else if(natureMode==='water')drawWater(ctx,w,h,tension,stiff,wind,complex);else drawSmoke(ctx,w,h,tension,stiff,wind,complex);
- const copy={cloth:'固定点越清晰，褶皱越可推理。硬布折线尖锐，软布曲线长而缓。',hair:'头发先看大束，再看分叉；根部固定，末端受重力和风影响。',water:'水没有固定轮廓，画的是绕开障碍物后的流线、波纹、泡沫和反光。',smoke:'烟是密度场：上升、扩散、变淡，被风拉伸，边缘破碎。'}[natureMode];$('foldExplain').innerHTML=`<b>${natureMode}</b><br>${copy}<br><br><b>绘画翻译：</b>看不见的力，通过可见物体的变形出现。先画力场方向，再选择最能表达运动的几条线。`;}
-function drawCloth(ctx,w,h,tension,stiff,wind,n){const anchors=[[220,95],[680,95]];ctx.fillStyle='#263240';anchors.forEach(a=>{ctx.beginPath();ctx.arc(a[0],a[1],8,0,TAU);ctx.fill()});ctx.strokeStyle='rgba(38,50,64,.22)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(anchors[0][0],anchors[0][1]);ctx.lineTo(anchors[1][0],anchors[1][1]);ctx.stroke();for(let i=0;i<n;i++){let t=i/(n-1),x=lerp(220,680,t),len=lerp(330,210,Math.abs(t-.5)*2)*(1-tension*.45),amp=(1-stiff)*42+10;ctx.beginPath();for(let j=0;j<80;j++){let u=j/79,y=95+u*len,x2=x+Math.sin(u*TAU*(1.4+tension*2)+i*.8)*amp*(1-u*.15)+wind*u*1.1;if(j===0)ctx.moveTo(x2,y);else ctx.lineTo(x2,y)}ctx.strokeStyle=i%2?'#6a7f8a':'#263240';ctx.lineWidth=i%2?1.6:2.8;ctx.stroke();}ctx.fillStyle='rgba(255,209,102,.8)';ctx.fillRect(190,86,520,8);ctx.fillStyle='#263240';ctx.font='800 14px system-ui';ctx.fillText('固定点 / anchor',195,75)}
-function drawHair(ctx,w,h,tension,stiff,wind,n){ctx.fillStyle='#f2d5b5';ctx.beginPath();ctx.ellipse(450,210,95,120,0,0,TAU);ctx.fill();ctx.strokeStyle='#263240';ctx.lineWidth=2;ctx.stroke();for(let i=0;i<n*2;i++){let a=lerp(Math.PI*.95,Math.PI*2.05,i/(n*2-1));let sx=450+Math.cos(a)*70,sy=150+Math.sin(a)*50;ctx.beginPath();ctx.moveTo(sx,sy);for(let j=1;j<70;j++){let u=j/69;let x=sx+Math.cos(a)*u*80+wind*u*1.4+Math.sin(u*TAU*1.2+i)*18*(1-stiff);let y=sy+u*(190+tension*80)+Math.sin(u*TAU+i)*10;ctx.lineTo(x,y)}ctx.strokeStyle=i%3?'#3a2e2c':'#7b5b54';ctx.lineWidth=lerp(4,1,i/(n*2));ctx.stroke();}ctx.fillStyle='#263240';ctx.fillText('大束 → 分叉，不要一开始画每根头发',230,500)}
-function drawWater(ctx,w,h,tension,stiff,wind,n){ctx.fillStyle='#d7eff5';ctx.fillRect(0,0,w,h);ctx.fillStyle='#7f786a';ctx.beginPath();ctx.ellipse(460,300,75,110,0,0,TAU);ctx.fill();ctx.strokeStyle='#263240';ctx.stroke();for(let i=0;i<n*4;i++){let y=80+i*(420/(n*4));ctx.beginPath();for(let x=40;x<860;x+=10){let dx=x-460,dy=y-300;let avoid=9000/(dx*dx+dy*dy+1000);let yy=y+Math.sin(x*.025+i)*8*(1-stiff)+avoid*dy*.28;let xx=x+wind*.22+avoid*dx*.18;if(x===40)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)}ctx.strokeStyle=i%4===0?'rgba(38,50,64,.58)':'rgba(77,168,216,.55)';ctx.lineWidth=i%4===0?2.5:1.3;ctx.stroke();}ctx.fillStyle='rgba(255,255,255,.82)';for(let i=0;i<35;i++){ctx.beginPath();ctx.arc(rand(405,535),rand(235,365),rand(1,4),0,TAU);ctx.fill()}ctx.fillStyle='#263240';ctx.fillText('水流绕开石头：前方堆积，两侧加速，后方涡流',215,32)}
-function drawSmoke(ctx,w,h,tension,stiff,wind,n){ctx.fillStyle='#f7f1e6';ctx.fillRect(0,0,w,h);for(let i=0;i<particles.length;i++){let p=particles[i];p.x+=wind*.018+(1-stiff)*Math.sin(p.y*.02+i)*.7;p.y-=1.1+tension*1.4;p.r+=.018+(1-stiff)*.03;p.life-=.003;if(p.y<-40||p.life<=0){p.x=rand(360,520);p.y=520;p.r=rand(3,10);p.life=1}let grd=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*5);grd.addColorStop(0,`rgba(95,105,120,${.16*p.life})`);grd.addColorStop(1,'rgba(95,105,120,0)');ctx.fillStyle=grd;ctx.beginPath();ctx.arc(p.x,p.y,p.r*5,0,TAU);ctx.fill();}ctx.strokeStyle='rgba(38,50,64,.35)';ctx.lineWidth=2;for(let i=0;i<n;i++){ctx.beginPath();for(let j=0;j<80;j++){let u=j/79;let x=450+wind*u*2+Math.sin(u*TAU*1.6+i)*60*u*(1-stiff);let y=520-u*440;if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();}ctx.fillStyle='#263240';ctx.fillText('烟不是轮廓，是密度场：上升、扩散、破碎、变淡',220,32)}
-function animateNature(){if(natureMode==='smoke'){renderFoldLab()}requestAnimationFrame(animateNature)}
+function renderStatic(){
+  $('pipelineCards').innerHTML = pipeline.map(p=>`<article class="pipe-card" style="--accent:${p.c}"><b>${p.t}</b><small>${p.en}</small><span>${p.d}</span></article>`).join('');
+  $('islandMap').innerHTML = islands.map(i=>`<article class="island ${i.id===selectedIsland?'active':''}" data-island="${i.id}" style="--accent:${i.color}"><div class="icon">${i.icon}</div><h3>${i.name}</h3><p>${i.core}</p><small>点击查看：现实 → 科学 → 绘画 → 练习</small></article>`).join('');
+  document.querySelectorAll('.island').forEach(el=>el.addEventListener('click',()=>{selectedIsland=el.dataset.island;document.querySelectorAll('.island').forEach(x=>x.classList.remove('active'));el.classList.add('active');renderKnowledge(selectedIsland);}));
+  $('missionGrid').innerHTML = missions.map(m=>`<article class="mission"><h3>${m.name}</h3><ol>${m.steps.map(s=>`<li>${s}</li>`).join('')}</ol></article>`).join('');
+  renderKnowledge(selectedIsland); renderGlossary(); renderEmotionTabs();
+}
+function renderKnowledge(id){
+  const i = islands.find(x=>x.id===id) || islands[0];
+  $('knowledgePanel').innerHTML = `<article class="principle-card"><h3>${i.icon} ${i.name}：${i.core}</h3><div class="matrix"><div class="col"><b>现实中它是什么？</b><ul>${i.real.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>知识如何解释？</b><ul>${i.science.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>绘画如何压缩？</b><ul>${i.drawing.map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="col"><b>如何练习校准？</b><ul>${i.practice.map(x=>`<li>${x}</li>`).join('')}</ul></div></div></article>`;
+}
+function renderGlossary(){
+  const q = $('glossarySearch').value.trim().toLowerCase();
+  const items = glossary.filter(g=>!q || [g.t,g.plain,g.use,g.try,...g.tag].join(' ').toLowerCase().includes(q));
+  $('glossaryGrid').innerHTML = items.map(g=>`<article class="term"><h3>${g.t}</h3><div>${g.tag.map(t=>`<span class="tag">${t}</span>`).join('')}</div><p><strong>通俗解释：</strong>${g.plain}</p><p><strong>绘画用途：</strong>${g.use}</p><p><strong>试一试：</strong>${g.try}</p></article>`).join('');
+}
+function openDrawer(key){
+  const e = explanations[key]; if(!e) return;
+  $('drawerTitle').textContent = e.title; $('drawerBody').innerHTML = e.html;
+  $('drawer').classList.add('show'); $('drawer').setAttribute('aria-hidden','false'); $('drawerBack').classList.add('show');
+}
+function closeDrawer(){ $('drawer').classList.remove('show'); $('drawer').setAttribute('aria-hidden','true'); $('drawerBack').classList.remove('show'); }
+function renderEmotionTabs(){
+  $('emotionTabs').innerHTML = Object.entries(emotions).map(([k,e])=>`<button class="${k===activeEmotion?'active':''}" data-emotion="${k}">${e.name}</button>`).join('');
+  document.querySelectorAll('[data-emotion]').forEach(b=>b.addEventListener('click',()=>{activeEmotion=b.dataset.emotion;renderEmotionTabs();drawStyle();}));
+}
 
-// ---------------- face ----------------
-function renderFaceLab(){const c=$('faceCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fffaf1';ctx.fillRect(0,0,w,h);const yaw=+$('faceYaw').value/55,pitch=+$('facePitch').value/30,anime=+$('animeLevel').value/100,chibi=+$('chibiLevel').value/100,line=+$('faceLine').value;const cx=w/2,cy=h/2+chibi*20;const headH=lerp(300,235,chibi),headW=lerp(205,185,chibi);ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#263240';ctx.lineWidth=line;ctx.fillStyle='#f2d5bd';ctx.beginPath();ctx.ellipse(cx,cy,headW/2,headH/2,0,0,TAU);ctx.fill();ctx.stroke();const centerShift=yaw*headW*.28;const eyeY=cy-headH*.11+pitch*25,noseY=cy+headH*.10+pitch*16,mouthY=cy+headH*.25+pitch*10;ctx.strokeStyle='rgba(77,168,216,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(cx+centerShift,cy,headW*.18,headH*.5,0,Math.PI*.5,Math.PI*1.5,yaw>0);ctx.stroke();ctx.beginPath();ctx.moveTo(cx-headW*.45,eyeY);ctx.quadraticCurveTo(cx,eyeY+pitch*12,cx+headW*.45,eyeY);ctx.stroke();ctx.beginPath();ctx.moveTo(cx-headW*.4,noseY);ctx.quadraticCurveTo(cx,noseY+pitch*8,cx+headW*.4,noseY);ctx.stroke();ctx.beginPath();ctx.moveTo(cx-headW*.35,mouthY);ctx.quadraticCurveTo(cx,mouthY+pitch*6,cx+headW*.35,mouthY);ctx.stroke();
- if($('facePlanes').checked){ctx.fillStyle='rgba(255,209,102,.22)';ctx.beginPath();ctx.moveTo(cx+centerShift,cy-headH*.45);ctx.lineTo(cx+headW*.45,eyeY);ctx.lineTo(cx+headW*.30,cy+headH*.35);ctx.lineTo(cx+centerShift,cy+headH*.48);ctx.closePath();ctx.fill();ctx.fillStyle='rgba(141,123,234,.18)';ctx.beginPath();ctx.moveTo(cx+centerShift,cy-headH*.45);ctx.lineTo(cx-headW*.45,eyeY);ctx.lineTo(cx-headW*.30,cy+headH*.35);ctx.lineTo(cx+centerShift,cy+headH*.48);ctx.closePath();ctx.fill();}
- const eyeSize=lerp(18,40,anime)*(1+chibi*.45),eyeGap=headW*.18;ctx.fillStyle='#263240';[-1,1].forEach(side=>{let ex=cx+centerShift*.45+side*(eyeGap+headW*.1*(1-Math.abs(yaw)*.4));let ew=eyeSize*(side*yaw>0?0.78:1.05);ctx.beginPath();ctx.ellipse(ex,eyeY+8,ew,eyeSize*.55,0,0,TAU);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex-ew*.25,eyeY,eyeSize*.17,0,TAU);ctx.fill();ctx.fillStyle='#263240';});ctx.strokeStyle='#6d4e48';ctx.lineWidth=line;ctx.beginPath();ctx.moveTo(cx+centerShift,noseY-38);ctx.quadraticCurveTo(cx+centerShift+28*yaw,noseY,cx+centerShift-8,noseY+18);ctx.stroke();ctx.beginPath();ctx.moveTo(cx-42,mouthY+10);ctx.quadraticCurveTo(cx,mouthY+25+chibi*8,cx+42,mouthY+10);ctx.stroke();
- const la=(+$('faceLight').value)*Math.PI/180;ctx.strokeStyle='rgba(231,111,111,.55)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,headW*.58,la+Math.PI*.5,la+Math.PI*1.05);ctx.stroke();ctx.fillStyle='#263240';ctx.font='800 14px system-ui';ctx.fillText('这是结构代理模型：用来校准中心线、五官锚点、面块和光向。',34,32);$('faceExplain').innerHTML=`<b>为什么以前会画错：</b><br>不参考对象时，脑中的头部模型容易缺少三件事：中心线随转头移动、五官锚点随面块转动、光影随法线变化。<br><br><b>动漫/Q版：</b>不是乱改比例，而是提高眼睛信息权重、降低鼻口细节、放大头部情绪表达，同时仍保持中心线和透视关系。`;}
+function drawCover(){
+  const c=$('coverCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; let t=0;
+  function frame(){
+    t+=0.01; ctx.clearRect(0,0,w,h);
+    const g=ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,'#08132f'); g.addColorStop(.45,'#174a93'); g.addColorStop(.75,'#8e70f2'); g.addColorStop(1,'#ffd166'); ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    ctx.save(); ctx.translate(w*.55,h*.52); ctx.rotate(Math.sin(t)*.05);
+    for(let z=0;z<7;z++){ctx.strokeStyle=`rgba(255,255,255,${.08+z*.035})`; ctx.lineWidth=1; ctx.beginPath(); const s=70+z*35; ctx.moveTo(-s,-s*.7); ctx.lineTo(s,-s*.45); ctx.lineTo(s*.78,s*.7); ctx.lineTo(-s*.86,s*.5); ctx.closePath(); ctx.stroke();}
+    ctx.restore();
+    for(let i=0;i<60;i++){const x=(Math.sin(i*91+t*.9)*.5+.5)*w; const y=(Math.cos(i*37+t*.7)*.5+.5)*h; ctx.fillStyle=`rgba(255,255,255,${.2+(i%7)*.08})`; ctx.beginPath(); ctx.arc(x,y,(i%3)+1,0,TAU); ctx.fill();}
+    ctx.strokeStyle='rgba(255,255,255,.72)'; ctx.lineWidth=2; ctx.beginPath();
+    for(let i=0;i<140;i++){const x=80+i*4; const y=280+Math.sin(i*.13+t*2)*40+Math.sin(i*.05)*22; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);} ctx.stroke();
+    requestAnimationFrame(frame);
+  } frame();
+}
 
-// ---------------- init ----------------
-function init(){renderPipeline();renderSources();renderMap();cover();bindFallbackDrag();bindPerspective();refreshSavedViews();if(!world.objects.length){addWorldShape('box');addWorldShape('sphere');world.objects[1].x=.9;world.objects[1].y=.25;world.selected=world.objects[0].id;updateSelect();}drawPerspective();renderShadingLab();initParticles();renderFoldLab();animateNature();renderFaceLab();}
-document.addEventListener('DOMContentLoaded',init);
+function projectPoint(p, yaw, pitch, fov, depth, w, h){
+  let [x,y,z]=p; z+=depth;
+  const cy=Math.cos(yaw), sy=Math.sin(yaw); let x1=x*cy-z*sy, z1=x*sy+z*cy;
+  const cp=Math.cos(pitch), sp=Math.sin(pitch); let y1=y*cp-z1*sp, z2=y*sp+z1*cp;
+  const f=(w*.55)/Math.tan(fov/2); const s=f/(z2+0.001);
+  return {x:w/2+x1*s, y:h/2-y1*s, z:z2, s};
+}
+function drawProjection(){
+  const c=$('projectionCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height;
+  const yaw=+$('projYaw').value*Math.PI/180, pitch=+$('projPitch').value*Math.PI/180, fov=+$('projFov').value*Math.PI/180, depth=+$('projDepth').value;
+  ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
+  const pts=[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+  const ps=pts.map(p=>projectPoint(p,yaw,pitch,fov,depth,w,h)); const edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  ctx.strokeStyle='rgba(74,143,214,.18)'; ctx.lineWidth=1;
+  for(const [a,b] of [[0,1],[3,2],[4,5],[7,6],[0,3],[1,2],[4,7],[5,6]]){extendLine(ctx,ps[a],ps[b],w,h)}
+  ctx.strokeStyle='#24313a'; ctx.lineWidth=4; ctx.lineJoin='round'; edges.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(ps[a].x,ps[a].y);ctx.lineTo(ps[b].x,ps[b].y);ctx.stroke();});
+  ctx.fillStyle='#ee8e8e'; ps.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,5,0,TAU);ctx.fill(); ctx.fillText('P'+i,p.x+7,p.y-7);});
+  ctx.fillStyle='rgba(16,24,39,.82)'; ctx.font='18px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`3D 坐标 → 投影平面｜FOV ${$('projFov').value}°｜Depth ${depth}`,24,34);
+}
+function extendLine(ctx,a,b,w,h){ const dx=b.x-a.x, dy=b.y-a.y; ctx.beginPath(); ctx.moveTo(a.x-dx*20,a.y-dy*20); ctx.lineTo(a.x+dx*20,a.y+dy*20); ctx.stroke(); }
+function drawPaper(ctx,w,h){ ctx.fillStyle='#fffaf0'; ctx.fillRect(0,0,w,h); ctx.strokeStyle='rgba(36,49,58,.06)'; ctx.lineWidth=1; for(let x=0;x<w;x+=32){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();} for(let y=0;y<h;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();} }
+
+function hexToRgb(hex){const n=parseInt(hex.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
+function rgbStr(r,g,b,a=1){return `rgba(${Math.round(clamp(r,0,255))},${Math.round(clamp(g,0,255))},${Math.round(clamp(b,0,255))},${a})`;}
+function drawShading(){
+  const c=$('shadingCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
+  const mode=$('shadeMode').value, lx=+$('lightX').value/100, ly=+$('lightY').value/100, rough=+$('roughness').value/100, mat=$('materialType').value;
+  const lz=Math.sqrt(Math.max(0.05,1-lx*lx-ly*ly)); const L=norm([lx,ly,lz]);
+  const albedos={plaster:[230,226,214],skin:[234,168,150],metal:[190,198,205],cloth:[135,160,180]}; const alb=albedos[mat]; const metal=mat==='metal'?0.75:0; const cloth=mat==='cloth'?1:0; const skin=mat==='skin'?1:0;
+  const cx=w/2, cy=h/2+12, r=170; const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++){for(let x=0;x<w;x++){const dx=(x-cx)/r, dy=(y-cy)/r, rr=dx*dx+dy*dy; const idx=(y*w+x)*4; if(rr>1){img.data[idx+3]=0; continue;} const z=Math.sqrt(1-rr); const N=norm([dx,-dy,z]); const ndl=Math.max(0,dot(N,L)); const depth=(z+1)/2; const V=[0,0,1]; const H=norm([L[0]+V[0],L[1]+V[1],L[2]+V[2]]); const spec=Math.pow(Math.max(0,dot(N,H)), lerp(8,120,1-rough))*(mat==='plaster'?0.15:mat==='cloth'?0.08:mat==='skin'?0.28:0.95); const fres=Math.pow(1-Math.max(0,dot(N,V)),3); const ao=0.22*Math.pow(1-z,2);
+      let R,G,B;
+      if(mode==='depth'){R=G=B=255*depth;} else if(mode==='normal'){R=(N[0]*.5+.5)*255;G=(N[1]*.5+.5)*255;B=(N[2]*.5+.5)*255;} else if(mode==='diffuse'){R=alb[0]*ndl;G=alb[1]*ndl;B=alb[2]*ndl;} else if(mode==='terminator'){const band=Math.abs(ndl-.08)<.025?1:0; R=alb[0]*(.35+ndl*.6)+band*80;G=alb[1]*(.35+ndl*.6)+band*35;B=alb[2]*(.35+ndl*.6);} else {R=alb[0]*(.18+ndl*.82-ao);G=alb[1]*(.18+ndl*.82-ao);B=alb[2]*(.18+ndl*.82-ao); R+=spec*255 + fres*(mat==='metal'?130:40); G+=spec*235 + fres*(mat==='metal'?150:45); B+=spec*210 + fres*(mat==='metal'?170:60); if(skin){R+=fres*35; G+=fres*8;} if(cloth){const weave=(Math.sin(x*.35)+Math.sin(y*.35))*6; R+=weave;G+=weave;B+=weave;}}
+      img.data[idx]=clamp(R,0,255); img.data[idx+1]=clamp(G,0,255); img.data[idx+2]=clamp(B,0,255); img.data[idx+3]=255; }}
+  ctx.putImageData(img,0,0); ctx.strokeStyle='#101827'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.stroke();
+  ctx.strokeStyle='#ffd166'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(90,85); ctx.lineTo(90+L[0]*80,85-L[1]*80); ctx.stroke(); ctx.fillStyle='#101827'; ctx.fillText('Light vector',105,92);
+}
+function norm(v){const m=Math.hypot(...v)||1;return v.map(x=>x/m)} function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+
+function drawFold(){
+  const c=$('foldCanvas'), ctx=c.getContext('2d'), w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
+  const stiff=+$('clothStiff').value/100, wind=+$('windForce').value/80;
+  const a={x:150,y:82}, b={x:360,y:82}; ctx.fillStyle='#101827'; [a,b].forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,8,0,TAU);ctx.fill();});
+  ctx.strokeStyle='#8f7be8'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.bezierCurveTo(190+wind*40,180,320+wind*40,180,b.x,b.y); ctx.stroke();
+  for(let i=0;i<13;i++){const t=i/12; const x=lerp(a.x,b.x,t)+Math.sin(t*Math.PI*4)*wind*20; const topY=lerp(a.y,b.y,t); const amp=lerp(88,38,stiff)*(0.45+Math.sin(t*Math.PI)*.6); const endY=topY+150+amp*Math.abs(Math.sin(t*Math.PI*3)); const bend=wind*70+(t-.5)*50*(1-stiff); ctx.strokeStyle=i%2?'rgba(36,49,58,.45)':'rgba(201,137,94,.78)'; ctx.lineWidth=i%2?1.5:3; ctx.beginPath(); ctx.moveTo(x,topY); ctx.bezierCurveTo(x+bend*.2,topY+55,x+bend,endY-55,x+bend*.6,endY); ctx.stroke();}
+  ctx.fillStyle='#4d5963'; ctx.fillText('固定点 → 张力线 → 重力下垂 → 材料硬度改变褶皱密度',28,38);
+}
+
+function drawFace(){
+  const c=$('faceCanvas'),ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
+  const yaw=+$('faceYaw').value/65, pitch=+$('facePitch').value/35, style=+$('animeStyle').value/100; const cx=w/2,cy=h/2+5;
+  const headW=130*(1-style*.12), headH=175*(1-style*.18); const faceShift=yaw*42;
+  ctx.save(); ctx.translate(cx,cy); ctx.strokeStyle='#24313a'; ctx.lineWidth=3; ctx.fillStyle='#fff1df'; ellipse(ctx,0,0,headW*(1-Math.abs(yaw)*.12),headH,0,true,true);
+  ctx.fillStyle='rgba(238,142,142,.13)'; ctx.beginPath(); ctx.ellipse(faceShift*.3,35,headW*.65,headH*.52,0,0,Math.PI); ctx.fill();
+  // guide lines on head surface
+  ctx.strokeStyle='rgba(74,143,214,.72)'; ctx.lineWidth=2; curveLine(ctx,faceShift,-headH*.85,faceShift*.6,headH*.78,yaw*30); // center
+  const lines=[[-48,'brow'],[-22,'eye'],[36,'nose'],[78,'mouth']];
+  lines.forEach(([yy])=>{ctx.beginPath();ctx.ellipse(faceShift*.18,yy+pitch*18,headW*.82*(1-Math.abs(yaw)*.25),9+Math.abs(yaw)*8,0,0,TAU);ctx.stroke();});
+  // eyes on curved surface
+  const eyeSize=lerp(15,34,style); const eyeY=-22+pitch*18; const sep=48*(1-Math.abs(yaw)*.28); const nearScale=1+yaw*.18, farScale=1-yaw*.18;
+  drawEye(ctx,faceShift*.22-sep,eyeY,eyeSize*farScale,style); drawEye(ctx,faceShift*.22+sep,eyeY,eyeSize*nearScale,style);
+  // nose wedge and mouth
+  ctx.strokeStyle='#c9895e'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(faceShift*.28, -5+pitch*16); ctx.lineTo(faceShift*.45+10*yaw, 38+pitch*18); ctx.lineTo(faceShift*.18-10*yaw, 41+pitch*18); ctx.stroke();
+  ctx.strokeStyle='#ee8e8e'; ctx.beginPath(); ctx.ellipse(faceShift*.22,78+pitch*15,30*(1-style*.35),5,0,0,Math.PI); ctx.stroke();
+  ctx.restore(); ctx.fillStyle='#4d5963'; ctx.fillText('头部坐标系：中线、眼线、鼻底、嘴线先转，五官再挂上去',22,34);
+}
+function ellipse(ctx,x,y,rx,ry,rot,fill,stroke){ctx.beginPath();ctx.ellipse(x,y,rx,ry,rot,0,TAU); if(fill)ctx.fill(); if(stroke)ctx.stroke();}
+function curveLine(ctx,x1,y1,x2,y2,b){ctx.beginPath();ctx.moveTo(x1,y1);ctx.bezierCurveTo(x1+b,y1+70,x2+b,y2-70,x2,y2);ctx.stroke();}
+function drawEye(ctx,x,y,s,style){ctx.save();ctx.translate(x,y);ctx.strokeStyle='#24313a';ctx.fillStyle='#fff';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(0,0,s*1.1,s*.55,0,0,TAU);ctx.fill();ctx.stroke();ctx.fillStyle='#24313a';ctx.beginPath();ctx.arc(0,1,s*.28,0,TAU);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-s*.08,-s*.08,s*.08+style*3,0,TAU);ctx.fill();ctx.restore();}
+
+function drawMaterial(){
+  const c=$('materialCanvas'), ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); drawPaper(ctx,w,h);
+  const alb=hexToRgb($('albedo').value), light=hexToRgb($('lightColor').value), env=hexToRgb($('envColor').value), toon=+$('toonLevel').value/100;
+  const cx=165, cy=210, r=110;
+  for(let y=0;y<h;y++){for(let x=0;x<w;x++){const dx=(x-cx)/r, dy=(y-cy)/r, rr=dx*dx+dy*dy; if(rr>1)continue; const z=Math.sqrt(1-rr); const ndl=clamp((-dx*.35 + -dy*.55 + z*.72),0,1); let band=toon>0.55?(ndl>.62?1:ndl>.24?.55:.22):ndl; const spec=Math.pow(Math.max(0,(-dx*.4+-dy*.5+z*.7)),45)*(1-toon*.4); ctx.fillStyle=rgbStr(alb[0]*(.2+band*.8)*light[0]/255+env[0]*(1-band)*.26+spec*255,alb[1]*(.2+band*.8)*light[1]/255+env[1]*(1-band)*.26+spec*245,alb[2]*(.2+band*.8)*light[2]/255+env[2]*(1-band)*.26+spec*220); ctx.fillRect(x,y,1,1);}}
+  ctx.strokeStyle='#24313a'; ctx.lineWidth=2; ctx.beginPath();ctx.arc(cx,cy,r,0,TAU);ctx.stroke();
+  const swatches=[['固有色',alb],['光源色',light],['环境色',env],['亮部',mix(alb,light,.5)],['暗部',mix(alb,env,.45)]];
+  swatches.forEach((s,i)=>{const y=80+i*52;ctx.fillStyle=rgbStr(...s[1]);ctx.fillRect(330,y,54,34);ctx.strokeStyle='#24313a';ctx.strokeRect(330,y,54,34);ctx.fillStyle='#24313a';ctx.fillText(s[0],395,y+23);});
+  ctx.fillText('颜色 = 固有色 × 光照 + 环境 + 高光 + 风格压缩',28,34);
+}
+function mix(a,b,t){return [lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)]}
+
+function drawStyle(){
+  const c=$('styleCanvas'), ctx=c.getContext('2d'),w=c.width,h=c.height; ctx.clearRect(0,0,w,h); const e=emotions[activeEmotion]; const base=hexToRgb(e.color); ctx.fillStyle=rgbStr(base[0]+40,base[1]+40,base[2]+40); ctx.fillRect(0,0,w,h); ctx.globalAlpha=.26; ctx.strokeStyle='#fff'; for(let i=0;i<15;i++){ctx.lineWidth=activeEmotion==='tension'?2+i%3:1; ctx.beginPath(); const y=30+i*28; if(activeEmotion==='calm'||activeEmotion==='warm'){ctx.moveTo(40,y);ctx.bezierCurveTo(160,y+10,280,y-10,480,y+5);} else if(activeEmotion==='lonely'){ctx.moveTo(60,y);ctx.lineTo(120,y+Math.sin(i)*8);} else if(activeEmotion==='dream'){ctx.moveTo(40,y);ctx.bezierCurveTo(120,y-40,250,y+50,470,y-10);} else {ctx.moveTo(40,y);ctx.lineTo(180,y-40);ctx.lineTo(250,y+20);ctx.lineTo(480,y-25);} ctx.stroke();}
+  ctx.globalAlpha=1; ctx.fillStyle='rgba(255,255,255,.82)'; ctx.fillRect(40,265,440,105); ctx.fillStyle='#24313a'; ctx.font='18px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`${e.name}：视觉参数卡`,60,296); ctx.font='14px '+getComputedStyle(document.body).fontFamily; ctx.fillText(`线条：${e.line}`,60,322); ctx.fillText(`空间：${e.space}`,60,344); ctx.fillText(`明暗：${e.light}`,60,366);
+  $('styleOutput').innerHTML=`<strong>${e.name}</strong> → 线条：${e.line}｜色彩：${e.color}｜空间：${e.space}｜明暗：${e.light}`;
+}
+
+const drawState={drawing:false,last:null,strokes:[]};
+function initDrawing(){
+  const c=$('drawCanvas'), ctx=c.getContext('2d'); drawGuides();
+  function pos(ev){const r=c.getBoundingClientRect(); const e=ev.touches?ev.touches[0]:ev; return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height};}
+  function down(ev){ev.preventDefault();drawState.drawing=true;drawState.last=pos(ev);}
+  function move(ev){if(!drawState.drawing)return;ev.preventDefault();const p=pos(ev); ctx.strokeStyle=$('penColor').value; ctx.lineWidth=+$('penSize').value; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.beginPath();ctx.moveTo(drawState.last.x,drawState.last.y);ctx.lineTo(p.x,p.y);ctx.stroke(); drawState.last=p;}
+  function up(){drawState.drawing=false;}
+  c.addEventListener('pointerdown',down); c.addEventListener('pointermove',move); window.addEventListener('pointerup',up);
+  ['guidePerspective','guideDepth','guideFace','guideLight'].forEach(id=>$(id).addEventListener('change',drawGuides));
+  $('clearDraw').addEventListener('click',()=>{ctx.clearRect(0,0,c.width,c.height);drawGuides();});
+  $('exportDraw').addEventListener('click',()=>{const a=document.createElement('a');a.download='drawescape-studio.png';a.href=c.toDataURL('image/png');a.click();});
+}
+function drawGuides(){
+  const c=$('drawCanvas'), ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#fffef9'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle='rgba(36,49,58,.06)'; ctx.lineWidth=1; for(let x=0;x<c.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();} for(let y=0;y<c.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();}
+  if($('guidePerspective').checked){const vp1={x:120,y:285},vp2={x:1080,y:285}; ctx.strokeStyle='rgba(74,143,214,.28)'; ctx.lineWidth=1.5; for(let y=120;y<690;y+=70){ctx.beginPath();ctx.moveTo(vp1.x,vp1.y);ctx.lineTo(600,y);ctx.stroke();ctx.beginPath();ctx.moveTo(vp2.x,vp2.y);ctx.lineTo(600,y);ctx.stroke();} ctx.strokeStyle='rgba(238,142,142,.4)';ctx.beginPath();ctx.moveTo(0,285);ctx.lineTo(c.width,285);ctx.stroke();}
+  if($('guideDepth').checked){ctx.fillStyle='rgba(143,123,232,.08)';ctx.fillRect(0,0,c.width,250);ctx.fillStyle='rgba(84,198,211,.08)';ctx.fillRect(0,250,c.width,250);ctx.fillStyle='rgba(245,185,79,.08)';ctx.fillRect(0,500,c.width,260);}
+  if($('guideFace').checked){ctx.strokeStyle='rgba(119,169,135,.45)';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(600,370,135,185,0,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(600,190);ctx.bezierCurveTo(630,300,630,440,600,555);ctx.stroke();[305,360,435,485].forEach(y=>{ctx.beginPath();ctx.ellipse(600,y,120,10,0,0,TAU);ctx.stroke();});}
+  if($('guideLight').checked){ctx.strokeStyle='rgba(245,185,79,.9)';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(140,110);ctx.lineTo(250,190);ctx.stroke();ctx.fillStyle='rgba(245,185,79,.9)';ctx.beginPath();ctx.arc(135,106,16,0,TAU);ctx.fill();}
+}
+
+function bindLabControls(){
+  ['projYaw','projPitch','projFov','projDepth'].forEach(id=>$(id).addEventListener('input',drawProjection));
+  ['shadeMode','lightX','lightY','roughness','materialType'].forEach(id=>$(id).addEventListener('input',drawShading));
+  ['clothStiff','windForce'].forEach(id=>$(id).addEventListener('input',drawFold));
+  ['faceYaw','facePitch','animeStyle'].forEach(id=>$(id).addEventListener('input',drawFace));
+  ['albedo','lightColor','envColor','toonLevel'].forEach(id=>$(id).addEventListener('input',drawMaterial));
+}
+
+function boot(){initUI();renderStatic();drawCover();bindLabControls();drawProjection();drawShading();drawFold();drawFace();drawMaterial();drawStyle();initDrawing();}
+window.addEventListener('DOMContentLoaded',boot);

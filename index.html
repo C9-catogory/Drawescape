@@ -1,261 +1,218 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Drawescape 绘梦境 V6｜世界折叠绘画引擎</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Drawescape V8｜Knowledge Blueprint</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="starfield" aria-hidden="true"></div>
-  <header class="topbar">
-    <button class="brand" onclick="go('hero')">✦ Drawescape <span>绘梦境 V6</span></button>
-    <nav class="nav">
-      <button onclick="go('map')">🗺️ 地图</button>
-      <button onclick="go('pipeline')">🧭 管线</button>
-      <button onclick="go('worldlab')">🧊 3D</button>
-      <button onclick="go('perspective')">📐 透视</button>
-      <button onclick="go('lightlab')">💡 光材质</button>
-      <button onclick="go('foldlab')">〰️ 褶皱自然</button>
-      <button onclick="go('facelab')">🙂 人脸风格</button>
-      <button onclick="go('sources')">📚 来源</button>
-    </nav>
+  <a class="skip" href="#world">跳到知识地图</a>
+  <header class="hero" id="top">
+    <div class="hero-grid">
+      <section class="hero-copy">
+        <div class="eyebrow">Starcove Drawing Lab · Knowledge Blueprint Edition</div>
+        <h1>Drawescape<br><span>把世界拆成结构，再折叠成画。</span></h1>
+        <p class="hero-lead">一个学习绘画、空间透视、计算机视觉与建模知识的可视化探索平台。这里不只教“怎么画”，而是解释世界为什么会这样被看见、被投影、被照亮、被压缩、被风格化。</p>
+        <div class="hero-actions">
+          <button class="btn primary" data-jump="pipeline">进入知识管线</button>
+          <button class="btn" data-jump="labs">打开实验室</button>
+          <button class="btn ghost" data-jump="glossary">CV 术语星典</button>
+        </div>
+        <div class="hero-motto">Reality → Geometry → Projection → Light → Material → Force → Feeling → Drawing</div>
+      </section>
+      <section class="cover-card" aria-label="Drawescape cover">
+        <canvas id="coverCanvas" width="720" height="520"></canvas>
+        <div class="hud hud-a">SCAN LAYERS</div>
+        <div class="hud hud-b">WORLD FOLDING ENGINE</div>
+        <div class="hud hud-c">DEPTH · NORMAL · LIGHT · STYLE</div>
+      </section>
+    </div>
   </header>
 
+  <nav class="rail" aria-label="主导航">
+    <button data-jump="pipeline">管线</button>
+    <button data-jump="world">地图</button>
+    <button data-jump="missions">任务</button>
+    <button data-jump="labs">实验</button>
+    <button data-jump="glossary">术语</button>
+    <button data-jump="studio">画台</button>
+  </nav>
+
   <main>
-    <section class="hero" id="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">World Folding Engine · Drawing × CV × CG × Art</p>
-        <h1>把现实折叠成画。</h1>
-        <p class="lead">Drawescape 不是让你背技巧，而是把绘画拆成可看见、可拖动、可校准的结构：坐标、透视、深度、法线、光照、材质、褶皱、情绪与风格。</p>
-        <div class="hero-actions">
-          <button class="primary" onclick="go('worldlab')">进入 3D 建模实验室</button>
-          <button onclick="go('pipeline')">从绘画管线开始</button>
-          <button onclick="toggleFocus()">🟨 聚焦模式</button>
-        </div>
-        <div class="tiny-grid">
-          <span>Observe 观察</span><span>Scan 拆层</span><span>Infer 推理</span><span>Fold 折叠</span><span>Draw 绘制</span><span>Calibrate 校准</span>
-        </div>
-      </div>
-      <div class="hero-panel">
-        <canvas id="coverCanvas" width="620" height="470" aria-label="Drawescape animated cover"></canvas>
-        <div class="hud-card top-left">SCAN MODE<br><b>Depth · Normal · Light</b></div>
-        <div class="hud-card bottom-right">World model<br><b>2D ⇄ 3D</b></div>
-      </div>
-    </section>
-
-    <section class="card" id="pipeline">
+    <section class="section intro" id="pipeline">
       <div class="section-head">
         <div>
-          <p class="eyebrow">核心总线</p>
-          <h2>绘画不是孤立技巧，而是一条信息整合管线</h2>
-          <p>这版恢复最开始的深度、法线、透视、渲染通道框架，并把每个交互都放回“为什么这样画”的解释里。</p>
+          <h2>绘画信息整合管线</h2>
+          <p>每个知识点都必须从“现实是什么”一路转译到“画面怎么做”。</p>
         </div>
-        <button onclick="resetProgress()">重置本地进度</button>
+        <button class="btn small" id="toggleCalm">柔和阅读</button>
       </div>
-      <div class="pipeline-grid" id="pipelineGrid"></div>
-      <div class="note-box">
-        <b>一句话：</b>你画错人脸、光影或褶皱时，通常不是“手不听话”，而是某个通道没有对齐：锚点、坐标、深度、法线、光源、材质、力场或风格参数。
-      </div>
+      <div class="pipeline" id="pipelineCards"></div>
+      <article class="principle-card wide">
+        <h3>开发铁规则</h3>
+        <p><strong>任何互动都要同时回答四个问题：</strong>现实中它是什么？计算机如何表示它？绘画中如何压缩它？用户如何练习并校准它？</p>
+        <p>例如“明暗交界线”：现实里是体块转向；计算机里是表面法线与光线方向的关系；绘画里是核心暗部、半调子、反光的组织边界；练习里是拖光源、标法线、画暗部、再校准。</p>
+      </article>
     </section>
 
-    <section class="card" id="map">
+    <section class="section" id="world">
       <div class="section-head">
         <div>
-          <p class="eyebrow">绘境地图</p>
-          <h2>九个星区：从几何到风格</h2>
-          <p>点击星区会打开对应的知识解释和练习，不再只有动画，而是“原理 → 互动 → 纸上练习 → 常见错误”。</p>
+          <h2>Drawescape 世界地图</h2>
+          <p>十个岛屿不是目录，而是学习路径。点开岛屿会看到知识转译矩阵。</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn small" id="expandAll">展开全部</button>
+          <button class="btn small" id="collapseAll">收起</button>
         </div>
       </div>
-      <div class="map-layout">
-        <svg id="worldMap" viewBox="0 0 1200 620" role="img" aria-label="Drawescape knowledge map"></svg>
-        <aside class="inspector" id="mapInspector"></aside>
-      </div>
+      <div class="island-map" id="islandMap"></div>
+      <div class="knowledge-panel" id="knowledgePanel"></div>
     </section>
 
-    <section class="lab-card" id="worldlab">
+    <section class="section" id="missions">
       <div class="section-head">
         <div>
-          <p class="eyebrow">3D 建模实验室</p>
-          <h2>从 Procreate / PS 线稿，到 Rhino / SU / Blender 的结构关系</h2>
-          <p>几何体可以添加、选择、拖动、删除、保存视角、截图。材质参数会影响漫反射、高光、粗糙度和金属感。</p>
-        </div>
-        <div class="row-wrap">
-          <button onclick="loadThreeLab()">尝试 WebGL / Three.js</button>
-          <button onclick="saveWorldSnapshot()">保存视角</button>
-          <button onclick="exportWorldShot()">导出截图</button>
+          <h2>跨岛任务：把知识串成绘画动作</h2>
+          <p>不是孤立学模块，而是用同一套管线完成“人脸、褶皱、场景、动漫化、情绪表达”。</p>
         </div>
       </div>
-      <div class="lab-layout two">
-        <div class="viewport-wrap">
-          <div id="webglStatus" class="status">默认 2.5D 稳定引擎已运行；WebGL 可手动加载。</div>
-          <div id="threeViewport" class="viewport"></div>
-          <canvas id="fallback3D" class="viewport-canvas" width="900" height="560"></canvas>
+      <div class="mission-grid" id="missionGrid"></div>
+    </section>
+
+    <section class="section lab-section" id="labs">
+      <div class="section-head">
+        <div>
+          <h2>可视化实验室</h2>
+          <p>V8 先回到“原理深入 + 稳定互动”。所有实验都用本地 Canvas，不依赖外部库。</p>
         </div>
-        <aside class="control-panel">
-          <h3>形体与视角</h3>
-          <div class="grid2">
-            <button onclick="addWorldShape('box')">盒体</button>
-            <button onclick="addWorldShape('sphere')">球</button>
-            <button onclick="addWorldShape('cylinder')">圆柱</button>
-            <button onclick="addWorldShape('cone')">圆锥</button>
-            <button onclick="addWorldShape('ribbon')">飘带</button>
-            <button onclick="addWorldShape('room')">房间</button>
+        <span class="status-pill">Stable Canvas Engine</span>
+      </div>
+
+      <div class="lab-grid">
+        <article class="lab-card span2" id="projectionLab">
+          <div class="lab-title">
+            <div><h3>相机塔：投影几何实验</h3><p>针孔相机、FOV、消失点、3D 点如何折叠到 2D。</p></div>
+            <button class="btn small" data-read="projection">讲解</button>
           </div>
-          <label>选择对象<select id="worldSelect" onchange="selectWorldObject(this.value)"></select></label>
-          <div class="grid2">
-            <button class="danger" onclick="deleteSelectedWorldObject()">删除选中</button>
-            <button onclick="duplicateSelectedWorldObject()">复制选中</button>
+          <canvas id="projectionCanvas" width="920" height="520"></canvas>
+          <div class="controls grid4">
+            <label>Yaw <input type="range" id="projYaw" min="-70" max="70" value="25"></label>
+            <label>Pitch <input type="range" id="projPitch" min="-35" max="35" value="-8"></label>
+            <label>FOV <input type="range" id="projFov" min="25" max="100" value="55"></label>
+            <label>Depth <input type="range" id="projDepth" min="3" max="10" value="6"></label>
           </div>
-          <label>Yaw 旋转<input type="range" id="camYaw" min="-180" max="180" value="-35" oninput="updateCameraControls()"></label>
-          <label>Pitch 俯仰<input type="range" id="camPitch" min="-55" max="55" value="18" oninput="updateCameraControls()"></label>
-          <label>FOV 透视强弱<input type="range" id="camFov" min="25" max="85" value="48" oninput="updateCameraControls()"></label>
-          <label>光源角度<input type="range" id="worldLight" min="0" max="360" value="315" oninput="updateWorldMaterial()"></label>
-          <label>固有色<input type="color" id="worldBaseColor" value="#f3b2a6" oninput="updateWorldMaterial()"></label>
-          <label>粗糙度 Roughness<input type="range" id="roughness" min="0" max="100" value="42" oninput="updateWorldMaterial()"></label>
-          <label>金属度 Metalness<input type="range" id="metalness" min="0" max="100" value="5" oninput="updateWorldMaterial()"></label>
-          <label class="check"><input type="checkbox" id="wireToggle" onchange="updateWorldMaterial()"> 显示线框/布线</label>
-          <label>恢复视角<select id="savedViews" onchange="restoreWorldSnapshot(this.value)"></select></label>
-          <button onclick="exportWorldJSON()">导出场景 JSON</button>
-          <div class="lesson-mini" id="worldLesson"></div>
-        </aside>
-      </div>
-    </section>
+          <p class="lab-note">绘画翻译：透视不是格子规则，而是相机把三维坐标压成平面坐标。FOV 越大，近大远小越强。</p>
+        </article>
 
-    <section class="lab-card" id="perspective">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">成像与透视学院</p>
-          <h2>透视是一种观看世界的方式：相机、视平线、消失点</h2>
-          <p>拖动消失点和视平线。画线时系统保留透视网格，帮助你检查坐标系是否一致。</p>
-        </div>
-        <div class="row-wrap">
-          <button onclick="clearPerspectiveDrawing()">清空画线</button>
-          <button onclick="exportCanvas('perspectiveCanvas','drawescape_perspective.png')">导出 PNG</button>
-        </div>
-      </div>
-      <div class="lab-layout two">
-        <canvas id="perspectiveCanvas" width="1000" height="620" class="paper-canvas"></canvas>
-        <aside class="control-panel">
-          <h3>投影模式</h3>
-          <div class="grid2">
-            <button onclick="setPerspectiveMode('one')">一点透视</button>
-            <button onclick="setPerspectiveMode('two')">两点透视</button>
-            <button onclick="setPerspectiveMode('three')">三点透视</button>
-            <button onclick="setPerspectiveMode('ortho')">正交/轴测</button>
+        <article class="lab-card span2" id="lightLab">
+          <div class="lab-title">
+            <div><h3>光之月台：深度 / 法线 / 明暗交界线</h3><p>把“调子”拆成深度、法线、漫反射、高光、AO。</p></div>
+            <button class="btn small" data-read="light">讲解</button>
           </div>
-          <label>画笔颜色<input type="color" id="pencilColor" value="#28323c"></label>
-          <label>线宽<input type="range" id="pencilWidth" min="1" max="12" value="3"></label>
-          <label class="check"><input type="checkbox" id="drawAssist" checked> 显示辅助线</label>
-          <button onclick="savePerspectiveSetup()">保存透视坐标系</button>
-          <div class="lesson-mini">
-            <b>原理：</b>欧洲学院派反复训练透视，是为了让二维纸面保持稳定的三维坐标系。消失点不是装饰，而是空间中平行线经过相机投影后的汇聚位置。
-            <br><br><b>练习：</b>先画盒子，再长出房间、街道、桌椅和人。人物也是几何，只是盒子、球、柱与软组织关系更复杂。
+          <canvas id="shadingCanvas" width="920" height="520"></canvas>
+          <div class="controls grid5">
+            <label>模式 <select id="shadeMode"><option value="beauty">整合图</option><option value="depth">深度图</option><option value="normal">法线图</option><option value="diffuse">漫反射</option><option value="terminator">交界线</option></select></label>
+            <label>光源X <input type="range" id="lightX" min="-100" max="100" value="-40"></label>
+            <label>光源Y <input type="range" id="lightY" min="-100" max="100" value="-50"></label>
+            <label>粗糙度 <input type="range" id="roughness" min="5" max="90" value="35"></label>
+            <label>材质 <select id="materialType"><option value="plaster">石膏</option><option value="skin">皮肤</option><option value="metal">金属</option><option value="cloth">布料</option></select></label>
           </div>
-        </aside>
-      </div>
-    </section>
+          <p class="lab-note">绘画翻译：明暗交界线是体块转向的证据；不是把某一圈涂黑，而是先理解表面朝向如何背离主光。</p>
+        </article>
 
-    <section class="lab-card" id="lightlab">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">光影与材质通道</p>
-          <h2>明暗交界线 = 法线与光源关系的边界</h2>
-          <p>这里把固有色、漫反射、高光、菲涅尔、环境光、AO 分开。颜色不再只是选色，而是通道合成。</p>
-        </div>
-      </div>
-      <div class="lab-layout three">
-        <canvas id="shadingCanvas" width="560" height="420" class="paper-canvas"></canvas>
-        <div class="control-panel">
-          <h3>材质参数</h3>
-          <label>固有色 Albedo<input type="color" id="shadeColor" value="#d8a07f" oninput="renderShadingLab()"></label>
-          <label>光源角度<input type="range" id="shadeAngle" min="0" max="360" value="315" oninput="renderShadingLab()"></label>
-          <label>光源高度<input type="range" id="shadeHeight" min="-50" max="90" value="40" oninput="renderShadingLab()"></label>
-          <label>粗糙度 Roughness<input type="range" id="shadeRough" min="0" max="100" value="35" oninput="renderShadingLab()"></label>
-          <label>金属度 Metalness<input type="range" id="shadeMetal" min="0" max="100" value="0" oninput="renderShadingLab()"></label>
-          <label>AO 缝隙暗度<input type="range" id="shadeAO" min="0" max="100" value="40" oninput="renderShadingLab()"></label>
-          <label class="check"><input type="checkbox" id="showTerminator" checked onchange="renderShadingLab()"> 显示明暗交界线</label>
-        </div>
-        <div class="lesson-mini" id="shadeExplain"></div>
-      </div>
-    </section>
-
-    <section class="lab-card" id="foldlab">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">褶皱、风、水、烟：自然是力场留下的证据</p>
-          <h2>先问：固定点在哪里？力往哪走？材料怎么反应？</h2>
-          <p>这不是流体/布料仿真器，而是绘画推理器：把复杂自然现象压缩成可画的结构线和明暗块。</p>
-        </div>
-      </div>
-      <div class="lab-layout two">
-        <canvas id="foldCanvas" width="900" height="560" class="paper-canvas"></canvas>
-        <aside class="control-panel">
-          <h3>自然模式</h3>
-          <div class="grid2">
-            <button onclick="setNatureMode('cloth')">布料褶皱</button>
-            <button onclick="setNatureMode('hair')">头发束</button>
-            <button onclick="setNatureMode('smoke')">烟</button>
-            <button onclick="setNatureMode('water')">水流</button>
+        <article class="lab-card" id="foldLab">
+          <div class="lab-title"><div><h3>褶皱山谷：力线推理</h3><p>固定点、张力、重力、材质硬度。</p></div><button class="btn small" data-read="fold">讲解</button></div>
+          <canvas id="foldCanvas" width="520" height="420"></canvas>
+          <div class="controls grid2">
+            <label>材料硬度 <input type="range" id="clothStiff" min="0" max="100" value="35"></label>
+            <label>风向 <input type="range" id="windForce" min="-80" max="80" value="20"></label>
           </div>
-          <label>张力 / 流速<input type="range" id="foldTension" min="0" max="100" value="45" oninput="renderFoldLab()"></label>
-          <label>材质硬度 / 粘性<input type="range" id="foldStiffness" min="0" max="100" value="38" oninput="renderFoldLab()"></label>
-          <label>风向<input type="range" id="foldWind" min="-90" max="90" value="18" oninput="renderFoldLab()"></label>
-          <label>复杂度<input type="range" id="foldComplexity" min="3" max="18" value="9" oninput="renderFoldLab()"></label>
-          <button onclick="exportCanvas('foldCanvas','drawescape_folds_nature.png')">导出练习图</button>
-          <div class="lesson-mini" id="foldExplain"></div>
-        </aside>
+          <p class="lab-note">画褶皱先问：哪里固定？哪里被拉？材料软硬如何？</p>
+        </article>
+
+        <article class="lab-card" id="faceLab">
+          <div class="lab-title"><div><h3>人形剧场：头部坐标系</h3><p>不是五官贴图，而是锚点挂在头部体积上。</p></div><button class="btn small" data-read="face">讲解</button></div>
+          <canvas id="faceCanvas" width="520" height="420"></canvas>
+          <div class="controls grid3">
+            <label>转头 <input type="range" id="faceYaw" min="-65" max="65" value="25"></label>
+            <label>俯仰 <input type="range" id="facePitch" min="-35" max="35" value="0"></label>
+            <label>风格 <input type="range" id="animeStyle" min="0" max="100" value="35"></label>
+          </div>
+          <p class="lab-note">动漫化可以放大眼睛、简化鼻口，但中心线、眼线、鼻底和嘴线必须仍在同一个坐标系里。</p>
+        </article>
+
+        <article class="lab-card" id="materialLab">
+          <div class="lab-title"><div><h3>材质星市：颜色不是色盘</h3><p>最终颜色是光、材质、空间与风格的结果。</p></div><button class="btn small" data-read="material">讲解</button></div>
+          <canvas id="materialCanvas" width="520" height="420"></canvas>
+          <div class="controls grid2">
+            <label>固有色 <input type="color" id="albedo" value="#f2a899"></label>
+            <label>光色 <input type="color" id="lightColor" value="#ffd59a"></label>
+            <label>环境色 <input type="color" id="envColor" value="#8db5d9"></label>
+            <label>漫画压缩 <input type="range" id="toonLevel" min="0" max="100" value="45"></label>
+          </div>
+          <p class="lab-note">皮肤不是“肉色”，而是固有色、暖光、冷环境、局部高光和色彩压缩共同生成。</p>
+        </article>
+
+        <article class="lab-card" id="styleLab">
+          <div class="lab-title"><div><h3>风格云城：感受翻译器</h3><p>把感受转成线条、颜色、空间、明暗、构图。</p></div><button class="btn small" data-read="style">讲解</button></div>
+          <div class="emotion-tabs" id="emotionTabs"></div>
+          <canvas id="styleCanvas" width="520" height="420"></canvas>
+          <div class="style-output" id="styleOutput"></div>
+        </article>
       </div>
     </section>
 
-    <section class="lab-card" id="facelab">
+    <section class="section" id="glossary">
       <div class="section-head">
         <div>
-          <p class="eyebrow">人脸结构与漫画化</p>
-          <h2>人不是“特殊魔法”，人也是几何，只是关系更多</h2>
-          <p>这里不是自动画漂亮脸，而是用简化头部代理模型训练坐标、中心线、五官锚点、转头、动漫化与 Q 版参数。</p>
+          <h2>CV / CG / 建模术语星典</h2>
+          <p>复杂词汇不是门槛，而是看懂绘画的工具。每个词都给出“通俗解释、绘画用途、操作练习”。</p>
         </div>
+        <input id="glossarySearch" class="search" placeholder="搜索：法线 / BRDF / 三角测量 / FOV ..." />
       </div>
-      <div class="lab-layout three">
-        <canvas id="faceCanvas" width="560" height="560" class="paper-canvas"></canvas>
-        <div class="control-panel">
-          <h3>结构参数</h3>
-          <label>转头 Yaw<input type="range" id="faceYaw" min="-55" max="55" value="0" oninput="renderFaceLab()"></label>
-          <label>俯仰 Pitch<input type="range" id="facePitch" min="-30" max="30" value="0" oninput="renderFaceLab()"></label>
-          <label>动漫化<input type="range" id="animeLevel" min="0" max="100" value="35" oninput="renderFaceLab()"></label>
-          <label>Q 版化<input type="range" id="chibiLevel" min="0" max="100" value="0" oninput="renderFaceLab()"></label>
-          <label>光源角度<input type="range" id="faceLight" min="0" max="360" value="315" oninput="renderFaceLab()"></label>
-          <label>线条粗细<input type="range" id="faceLine" min="1" max="8" value="3" oninput="renderFaceLab()"></label>
-          <label class="check"><input type="checkbox" id="facePlanes" checked onchange="renderFaceLab()"> 显示面块/辅助线</label>
-        </div>
-        <div class="lesson-mini" id="faceExplain"></div>
-      </div>
+      <div class="glossary-grid" id="glossaryGrid"></div>
     </section>
 
-    <section class="card" id="stylelab">
+    <section class="section" id="studio">
       <div class="section-head">
         <div>
-          <p class="eyebrow">感受翻译器</p>
-          <h2>把内心感受翻译成绘画语言</h2>
-          <p>情绪不是神秘的，它可以变成线条速度、色彩温度、明暗对比、空间距离、边缘清晰度和比例变形。</p>
+          <h2>信息整合绘画台</h2>
+          <p>画布不是单独存在，而是把参考、透视、深度、光源、锚点、风格卡叠在一起。</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn small" id="clearDraw">清空</button>
+          <button class="btn small" id="exportDraw">导出 PNG</button>
         </div>
       </div>
-      <div class="emotion-grid" id="emotionGrid"></div>
-    </section>
-
-    <section class="card" id="sources">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">原理来源与后续补强</p>
-          <h2>先把知识框架放回来，再逐步深化细节</h2>
-          <p>V6 不再用错误的人脸/烟雾假装完整，而是明确哪些是绘画代理模型，哪些未来需要更真实的 WebGL / 物理 / 人体模型。</p>
+      <div class="studio-wrap">
+        <div class="studio-tools">
+          <label>笔色 <input type="color" id="penColor" value="#25313a"></label>
+          <label>线宽 <input type="range" id="penSize" min="1" max="18" value="4"></label>
+          <label><input type="checkbox" id="guidePerspective" checked> 透视辅助</label>
+          <label><input type="checkbox" id="guideDepth"> 深度三层</label>
+          <label><input type="checkbox" id="guideFace"> 头部辅助</label>
+          <label><input type="checkbox" id="guideLight"> 光源箭头</label>
         </div>
+        <canvas id="drawCanvas" width="1200" height="760"></canvas>
       </div>
-      <div class="source-grid" id="sourceGrid"></div>
     </section>
   </main>
 
-  <div class="toast" id="toast" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <h3 id="drawerTitle">知识讲解</h3>
+      <button class="btn small" id="closeDrawer">关闭</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+  <div class="drawer-back" id="drawerBack"></div>
+
+  <footer class="footer">
+    <p>Drawescape V8 · Knowledge Blueprint Edition · 目标：让数理化、计算机建模和绘画变成一场有趣的世界观察游戏。</p>
+  </footer>
+
   <script src="app.js"></script>
 </body>
 </html>
